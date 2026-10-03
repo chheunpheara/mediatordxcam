@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+/**
+ * Design tokens.
+ *
+ * Status colours are always paired with an icon and a text label in the UI —
+ * colour alone never carries meaning (§32). The `--color-*` names below exist so
+ * a status colour is chosen by role, not by hue.
+ */
+@theme {
+  --color-surface: oklch(99% 0.002 250);
+  --color-surface-raised: oklch(100% 0 0);
+  --color-surface-sunken: oklch(96.5% 0.004 250);
+  --color-border: oklch(90% 0.006 250);
+  --color-border-strong: oklch(80% 0.01 250);
+
+  --color-ink: oklch(24% 0.02 260);
+  --color-ink-muted: oklch(50% 0.015 260);
+  --color-ink-subtle: oklch(62% 0.012 260);
+
+  --color-brand: oklch(52% 0.15 255);
+  --color-brand-hover: oklch(46% 0.16 255);
+  --color-brand-soft: oklch(95% 0.03 255);
+
+  --color-positive: oklch(52% 0.15 155);
+  --color-positive-soft: oklch(95% 0.05 155);
+  --color-negative: oklch(52% 0.19 25);
+  --color-negative-soft: oklch(96% 0.04 25);
+  --color-caution: oklch(58% 0.13 75);
+  --color-caution-soft: oklch(96% 0.05 75);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Khmer',
+    'Khmer OS', sans-serif;
+
+  --radius-card: 0.875rem;
+}
+
+/**
+ * Base layer.
+ *
+ * A visible focus ring is defined globally rather than per-component so keyboard
+ * focus is never lost on a control that forgot one (§32).
+ */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface-sunken text-ink font-sans antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-brand outline-2 outline-offset-2;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/*
+ * Composable classes are declared with `@utility`, not `@layer components`.
+ * Tailwind v4 only lets `@apply` reference real utilities, so a `.btn` defined in
+ * a component layer cannot be applied by `.btn-primary`.
+ */
+@utility card {
+  @apply bg-surface-raised border-border rounded-card border shadow-sm;
+}
+
+@utility btn {
+  @apply focus-visible:outline-brand inline-flex items-center justify-center gap-2 rounded-lg
+    px-4 py-2.5 text-sm font-semibold transition-colors
+    disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-primary {
+  @apply btn bg-brand text-white hover:bg-brand-hover;
+}
+
+@utility btn-secondary {
+  @apply btn border-border-strong bg-surface-raised text-ink hover:bg-surface-sunken;
+}
+
+/* Screen-reader-only content: visible to assistive tech, invisible on screen. */
+.sr-only-focusable:not(:focus):not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

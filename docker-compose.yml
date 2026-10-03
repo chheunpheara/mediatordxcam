@@ -1,0 +1,116 @@
+# CamDX KYC — local development stack.
+#
+#   docker compose up --build              # app (frontend + API, single origin)
+#   docker compose --profile db up -d      # also start PostgreSQL
+#   docker compose --profile tools up --build   # optional admin tooling
+#
+# PostgreSQL is opt-in on purpose: §4 allows it "only where persistent
+# application data is actually required", and Phase 1 persists nothing
+# (implementation-plan.md D6, D7).
+#
+# Secrets are never baked into an image. CAMDX_* come from the host environment or
+# from a local `.env`, which is git-ignored (§22).
+
+name: camdx-kyc
+
+services:
+  app:
+    build:
+      # Context is the repo root so the frontend stage can build the SPA and the
+      # backend can serve it — one origin, no CORS in production (§30).
+      context: .
+      dockerfile: backend/Dockerfile
+    image: camdx-kyc-backend:local
+    ports:
+      - "8000:8000"
+    environment:
+      # Every Settings field must appear here. Compose only forwards variables
+      # listed in this block — anything present in `.env` but absent here is
+      # silently dropped, so a setting can look configured and do nothing.
+      # tests/integration/test_compose_env_contract.py fails if they drift.
+      #
+      # APP_ENV is pinned, not overridable: it describes the runtime, and this is
+      # a container. Letting `.env` set it to `local` would enable internal
+      # detail in error envelopes inside Docker (§28).
+      APP_ENV: docker
+      APP_NAME: ${APP_NAME:-camdx-kyc-backend}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8000}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Hard-off in the container. Payload logging needs an explicit opt-in that a
+      # compose file should never provide (§29).
+      LOG_SENSITIVE_PAYLOADS: "false"
+
+      CAMDX_MODE: ${CAMDX_MODE:-mock}
+      CAMDX_BASE_URL: ${CAMDX_BASE_URL:-}
+      CAMDX_CLIENT_ID: ${CAMDX_CLIENT_ID:-}
+      CAMDX_CLIENT_SECRET: ${CAMDX_CLIENT_SECRET:-}
+      CAMDX_API_KEY: ${CAMDX_API_KEY:-}
+      CAMDX_TIMEOUT: ${CAMDX_TIMEOUT:-30}
+      CAMDX_EXPOSE_DEVELOPER_VIEW: ${CAMDX_EXPOSE_DEVELOPER_VIEW:-false}
+
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8000}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
+      MIN_IMAGE_WIDTH: ${MIN_IMAGE_WIDTH:-640}
+      MIN_IMAGE_HEIGHT: ${MIN_IMAGE_HEIGHT:-400}
+
+      # Fixed to the volume mount path; a host override here would point the
+      # store somewhere the container cannot write, and biometric storage must
+      # stay off any served path in any case (§29).
+      TEMP_STORAGE_DIR: /app/var/tmp
+      TEMP_ARTIFACT_TTL_SECONDS: ${TEMP_ARTIFACT_TTL_SECONDS:-900}
+      TEMP_SWEEP_INTERVAL_SECONDS: ${TEMP_SWEEP_INTERVAL_SECONDS:-60}
+
+      # Declared for the optional `db` profile. Unused by Phase 1 (D7).
+      DATABASE_URL: ${DATABASE_URL:-}
+    volumes:
+      # Named volume for biometric temp storage: no bytes in an image layer, and
+      # `docker compose down -v` wipes them (§29).
+      - app-tmp:/app/var/tmp
+    restart: unless-stopped
+    healthcheck:
+      # 127.0.0.1, not `localhost`: curl can resolve `localhost` to ::1 first,
+      # while the app binds IPv4 only.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # NOTE: there is deliberately no separate `frontend` service.
+  #
+  # An earlier revision had one — nginx serving the same `dist` this image already
+  # serves — behind a `dev` profile. It was redundant (two origins, identical
+  # bytes) and actively misleading: nothing listened on 5173 under a plain
+  # `docker compose up`, so hitting the conventional frontend port looked like a
+  # broken build.
+  #
+  # One image, one origin, one port. For frontend hot-reload development run
+  # `make frontend-run` on the host: Vite serves on 5173 with HMR and proxies
+  # /api to the app container. A split deployment recipe lives in
+  # docs/development.md §8.
+
+  postgres:
+    # Opt-in: `docker compose --profile db up -d`. Unused by Phase 1 (D7).
+    image: postgres:17-alpine
+    profiles: ["db"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-camdx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-camdx_local_only}
+      POSTGRES_DB: ${POSTGRES_DB:-camdx_kyc}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-camdx}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  app-tmp:
+  postgres-data:

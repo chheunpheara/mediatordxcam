@@ -1,0 +1,145 @@
+# Testing Guide
+
+Three levels, per §34.
+
+---
+
+## 1. Layout
+
+```text
+backend/tests/
+├── conftest.py                 forces CAMDX_MODE=mock, temp storage isolation
+├── unit/                       pure domain — no I/O, no network
+│   ├── test_config.py
+│   ├── test_errors.py
+│   └── test_logging_redaction.py
+└── integration/                FastAPI over ASGI transport
+    └── test_health.py
+
+frontend/src/**/*.test.ts(x)    Vitest + Testing Library
+
+tests/
+├── contract/                   cross-boundary drift guards
+├── e2e/                        Scenarios A–I (Playwright, Phase 10)
+└── fixtures/                   synthetic images, sanitised payloads
+```
+
+---
+
+## 2. Rules
+
+1. **No test contacts the real CamDigiKey service.** `conftest.py` forces
+   `CAMDX_MODE=mock` and asserts it.
+2. **Domain unit tests import no I/O module.** No `httpx`, no `cv2`, no FastAPI.
+   A test that needs any of them belongs in `integration/`.
+3. **No real documents in Git.** Fixtures are generated synthetically.
+4. **Every phase ships its tests.** A phase is not done until its tests are green.
+5. **No skipped tests.** A test that cannot run is deleted, not skipped.
+6. **Deterministic outcomes.** Mock results are selected by documented trigger
+   codes, never by randomness (`docs/camdx-integration.md` §3).
+
+---
+
+## 3. Level 1 — Unit
+
+Targets, per §34:
+
+| Target | Module | Phase |
+|--------|--------|-------|
+| OCR field mapping | `integrations/camdx/services/idcard_ocr.py` | 3 |
+| Face detection service | `services/face_service.py` | 3 |
+| Verification requirement rules | `domain/requirements.py` | 5 |
+| CamDX response normalization | `integrations/camdx/normalizer.py` | 5 |
+| Error mapping | `integrations/camdx/errors.py` | 5 |
+
+Deliberate properties:
+
+- **An unchecked field is never reported as a mismatch.** If CamDX omits DOB, the
+  normalized result must not list DOB in `incorrectFields`.
+- **A missing identity value stays missing.** The OCR mapper never substitutes a
+  default, a placeholder, or a plausible-looking value (§16).
+- **Face extraction yields no verification claim.** Asserted structurally: the
+  `FaceExtraction` type has no `verified` attribute (§13).
+- **No upstream text escapes.** Every mapped error case asserts its message
+  contains no vendor code, endpoint, or status line (§28).
+
+Phase 1 ships `test_config`, `test_errors`, `test_logging_redaction`.
+
+---
+
+## 4. Level 2 — Integration
+
+Exercises the real application over ASGI transport with `MockCamDXProvider`:
+
+```text
+POST /api/v1/kyc/id-card/process
+      → OCR fields + face extraction + artefact handles
+GET  /api/v1/kyc/verification-methods
+      → all six methods with their requirement flags
+POST /api/v1/kyc/verify
+      → CamDX mock → normalized result
+```
+
+Plus the standing privacy assertions (§29):
+
+- No route exposes uploaded files through a static mount
+- Artefact bytes are reachable only via the artefact endpoint
+- Log output contains no national ID and no image bytes
+- An expired handle returns `404`, not the file
+
+Each integration test gets an isolated `TEMP_STORAGE_DIR`; artefacts never leak
+between tests.
+
+---
+
+## 5. Level 3 — End-to-End
+
+Playwright against the Docker Compose stack. Scenarios A–I from §34.
+
+| Scenario | Flow | Phase |
+|----------|------|-------|
+| A | ID Card → OCR → API 1 → success | 5 |
+| B | ID Card → OCR → current face → API 2 → success | 6 |
+| C | ID Card → OCR → current face → API 3 → success | 6 |
+| D | ID Card → OCR → liveness → API 4 → success | 7 |
+| E | Passport → API 6 → OCR | 8 |
+| F | Incorrect identity information → partial / failure | 5 |
+| G | Face mismatch → failure | 6 |
+| H | No face detected → processing failure | 3 |
+| I | Liveness failure → verification failure | 7 |
+
+Each scenario asserts three things beyond the happy path:
+
+1. The user-facing message is the §25/§26/§27 wording, not a generic error.
+2. No raw JSON appears anywhere in the DOM.
+3. The state machine refuses the illegal transition rather than proceeding.
+
+---
+
+## 6. Running
+
+```bash
+make check                                  # lint + typecheck + all unit/integration
+cd backend && pytest -v
+cd frontend && npm run test
+
+# Phase 10
+docker compose --profile e2e up -d
+npx playwright test
+```
+
+---
+
+## 7. Phase 1 status
+
+| Suite | Result |
+|-------|--------|
+| `backend/tests/unit` | 3 files, config / errors / logging redaction |
+| `backend/tests/integration` | `test_health.py` — liveness, readiness, response shape, request-id echo |
+| `frontend` | Vitest configured; smoke test for the app shell and route rendering |
+| `make check` | ruff, mypy, pytest, eslint, tsc, vitest all green |
+| Docker | `docker compose up --build` healthy; `/health` → `200` |
+
+E2E (Scenarios A–I) arrives with the phases that make each flow possible —
+A and F in Phase 5, H in Phase 3, and so on. They are not written before the
+feature they exercise exists.

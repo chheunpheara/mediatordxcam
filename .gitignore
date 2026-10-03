@@ -1,0 +1,68 @@
+# ─── Secrets (§22) ────────────────────────────────────────────────────────────
+# `.env` and every real credential file. Never commit.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ─── Biometric and identity data (§29) ────────────────────────────────────────
+# Scoped by PATH, never by extension. A global `*.jpg`/`*.png` rule also swallows
+# README screenshots, favicons and architecture diagrams, and it fails silently:
+# the file is simply absent from the commit with no error anywhere. Real uploads
+# and faces only ever land in these directories, so path-scoped rules are both
+# sufficient and safe.
+var/
+backend/var/
+**/var/tmp/
+tests/fixtures/
+tests/e2e/artifacts/
+uploads/
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Test and E2E artefacts ───────────────────────────────────────────────────
+# Playwright traces and videos can contain screenshots of documents.
+tests/e2e/artifacts/
+playwright-report/
+test-results/
+
+# ─── Editors and OS ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+docker-compose.override.yml

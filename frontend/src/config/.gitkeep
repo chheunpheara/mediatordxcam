@@ -1,0 +1,2 @@
+# apiClient.ts — the only place network access happens.
+# Populated in: Phase 2
