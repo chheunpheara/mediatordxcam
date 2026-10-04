@@ -40,11 +40,11 @@ export interface ValidationSuccess {
 
 export type ValidationResult = ValidationSuccess | ValidationFailure
 
-/** §7: JPEG and PNG only. */
-export const ACCEPTED_MIME_TYPES = ['image/jpeg', 'image/png'] as const
+/** §6: JPG, JPEG, PNG and WebP. */
+export const ACCEPTED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
 
 /** Passed to `accept` on the file input. */
-export const ACCEPTED_FILE_EXTENSIONS = '.jpg,.jpeg,.png'
+export const ACCEPTED_FILE_EXTENSIONS = '.jpg,.jpeg,.png,.webp'
 
 /** §7: 10 MB. Binary megabytes, matching how browsers report `File.size`. */
 export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
@@ -54,7 +54,7 @@ export const MIN_WIDTH_PX = 640
 export const MIN_HEIGHT_PX = 480
 
 export const MESSAGES = {
-  invalidType: 'Invalid file type. Please upload a JPEG or PNG image.',
+  invalidType: 'Please upload a JPG, PNG or WebP image.',
   tooLarge: 'File is too large. Maximum size is 10 MB.',
   tooSmall: 'Image is too small. Minimum resolution is 640 × 480 pixels.',
   unreadable: 'File is corrupted or cannot be read as an image.',

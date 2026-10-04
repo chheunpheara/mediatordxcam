@@ -20,12 +20,14 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.config import AppEnvironment, Settings
 from app.main import create_app
+from tests.fixtures.images import card_with_face, card_without_face
 
 
 @pytest.fixture(autouse=True)
 def _isolate_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Force the safe subset of configuration for the whole test session."""
     monkeypatch.setenv("CAMDX_MODE", "mock")
+    monkeypatch.setenv("OCR_PROVIDER", "mock")
     monkeypatch.setenv("LOG_SENSITIVE_PAYLOADS", "false")
     monkeypatch.setenv("APP_ENV", AppEnvironment.LOCAL.value)
     yield
@@ -58,6 +60,18 @@ async def client(app: FastAPI) -> AsyncClient:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture(scope="session")
+def card_bytes() -> bytes:
+    """A valid card-shaped image with no face. Used for OCR-only processing."""
+    return card_without_face()
+
+
+@pytest.fixture(scope="session")
+def face_card_bytes() -> bytes:
+    """A card with one drawn face, for the real-cascade integration test."""
+    return card_with_face()
 
 
 @pytest.fixture

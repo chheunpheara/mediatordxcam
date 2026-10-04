@@ -49,6 +49,7 @@ Targets, per §34:
 | OCR field mapping | `integrations/camdx/services/idcard_ocr.py` | 3 |
 | Face detection service | `services/face_service.py` | 3 |
 | Verification requirement rules | `domain/requirements.py` | 5 |
+| Six-adapter registry | `integrations/camdx/services/__init__.py` | 5 |
 | CamDX response normalization | `integrations/camdx/normalizer.py` | 5 |
 | Error mapping | `integrations/camdx/errors.py` | 5 |
 
@@ -130,15 +131,77 @@ npx playwright test
 
 ---
 
-## 7. Phase 1 status
+## 7. Phase 1–4 status
 
 | Suite | Result |
 |-------|--------|
-| `backend/tests/unit` | 3 files, config / errors / logging redaction |
-| `backend/tests/integration` | `test_health.py` — liveness, readiness, response shape, request-id echo |
-| `frontend` | Vitest configured; smoke test for the app shell and route rendering |
-| `make check` | ruff, mypy, pytest, eslint, tsc, vitest all green |
-| Docker | `docker compose up --build` healthy; `/health` → `200` |
+| `backend/tests/unit` | config, errors, logging redaction, artifacts, face rules, uploads, mock OCR, document orchestration |
+| `backend/tests/integration` | health, compose env contract, upload-rules contract, ID-card endpoint, verification endpoints, artefact sweeper |
+| `frontend` | Vitest; validation, dropzone, session persistence, landing page, API client, workspace columns (document, face, editable form), verification method panel |
+| `make check` | ruff, ruff format, mypy, pytest, eslint, tsc, vitest all green |
+| Docker | `docker compose build app` healthy; `/`, `/health`, `/api/v1/health` → `200`; processing and artefact endpoints exercised over HTTP |
+
+`314 passed` backend, `99 passed` frontend.
+
+### What the workspace tests pin down
+
+Each column is asserted against the section of the plan that specifies it, so a
+layout change cannot quietly drop a requirement:
+
+| Requirement | Guard |
+|-------------|-------|
+| §9 column 1 shows the uploaded file | preview `src` points at `documentRef`, not `faceRef` |
+| §9 zoom | transform goes 100% → 150%; zoom-out disabled at origin |
+| §12 no-face / multiple / poor-quality | all three sentences asserted **verbatim**, not by keyword |
+| §12 do not fabricate a face | no `img` present when detection failed |
+| §13 detection ≠ verification | OpenCV is named, and no `verified` text anywhere on the page |
+| §14 nine fields, in order | label list asserted by equality against `IDENTITY_FORM_FIELDS` |
+| §14 all fields editable | every input enabled, including ones OCR already read |
+| §14 corrections persist | edit survives re-render; clear is honoured as a correction |
+| §14 no cross-card leakage | corrections are dropped when a different card is processed |
+| §16 unread field | empty input plus "Please enter this information." |
+
+### Why the face tests do not use a photograph
+
+`FaceService` takes a `FaceDetector`. The rules — one face only, clear enough to
+use, crop it and store it — are tested through a scripted detector
+(`tests/fixtures/detectors.py`), so they are deterministic and do not depend on a
+statistical model.
+
+A Haar cascade is trained on photographs. It is sensitive to `scaleFactor` in a
+way that is not a property of this application: a synthetic drawing detected at
+`scaleFactor=1.05, minNeighbors=1` and not at `1.1/1.2`, and `minNeighbors=1` is far
+too permissive for production because it fires on background texture — a false
+positive would hand the user a crop of something that is not their face. Asserting
+a face count against a drawing would be testing the cascade, and would break on an
+OpenCV upgrade.
+
+So one integration test runs the real cascade and asserts only that a valid
+outcome comes back, never how many faces were found.
+
+### Why `TestClient` appears in the sweeper test
+
+The shared `client` fixture uses `ASGITransport`, which does **not** run lifespan
+events. The artefact sweeper is created in the lifespan, so a test using that
+fixture cannot observe it — and `TempArtifactStore.sweep` passes on its own whether
+or not the background loop was ever started. `test_artifact_sweeper.py` uses
+`TestClient` for exactly that reason.
+
+### Cross-boundary contract tests
+
+Two rules are implemented twice, once in TypeScript for the browser and once in
+Python for the server, and both silently win over each other depending on where
+the value comes from:
+
+- **Upload rules.** `test_upload_rules_contract.py` reads the browser's constants
+  and compares them with `Settings`, `.env.example` *and* `docker-compose.yml`.
+  The last two matter because either can restate a limit and override the model
+  default, so container behaviour diverges from local development with no error.
+  The user's four upload messages are asserted to be byte-identical in both
+  layers.
+- **Container environment.** `test_compose_env_contract.py` checks every `Settings`
+  field is forwarded by compose, and that compose forwards nothing `Settings`
+  does not know about.
 
 E2E (Scenarios A–I) arrives with the phases that make each flow possible —
 A and F in Phase 5, H in Phase 3, and so on. They are not written before the

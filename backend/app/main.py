@@ -13,9 +13,10 @@ Two invariants this module is responsible for:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response, status
@@ -29,6 +30,11 @@ from app.core.config import AppEnvironment, Settings, get_settings
 from app.core.errors import AppError, ErrorCode, error_envelope, register_exception_handlers
 from app.core.ids import REQUEST_ID_HEADER, new_request_id
 from app.core.logging import configure_logging, register_sensitive_values
+from app.services.artifacts import TempArtifactStore
+
+#: Every route below this prefix returns data derived from an identity document.
+#: Used to apply the no-store policy in one place rather than per endpoint.
+API_PREFIX = "/api/"
 
 logger = logging.getLogger("camdx.app")
 
@@ -61,8 +67,9 @@ def _configure_observability(settings: Settings) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start-up and shut-down hooks.
 
-    Phase 3 adds the temp-artefact sweeper here; Phase 10 adds rate limiting and
-    connection pools. Start-up validates configuration and fails fast.
+    Starts the temp-artefact sweeper (§29) so biometric files are deleted on a
+    timer even if no request ever touches them again. On shut-down it sweeps once
+    more and clears the directory, so a stopped container leaves nothing behind.
     """
     settings: Settings = app.state.settings
     _configure_observability(settings)
@@ -70,8 +77,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "startup",
         extra={"environment": str(settings.app_env), "camdx_mode": str(settings.camdx_mode)},
     )
-    yield
-    logger.info("shutdown")
+
+    store = TempArtifactStore(
+        settings.temp_storage_dir,
+        ttl_seconds=settings.temp_artifact_ttl_seconds,
+    )
+    sweeper = asyncio.create_task(_sweep_loop(store, settings))
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper
+        # Remove everything on the way out: a stopped container must not leave
+        # biometric files on a volume that outlives it.
+        store.clear()
+        logger.info("shutdown")
+
+
+async def _sweep_loop(store: TempArtifactStore, settings: Settings) -> None:
+    """Delete expired artefacts on a timer until cancelled."""
+    interval = settings.temp_sweep_interval_seconds
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(store.sweep)
+        except Exception:  # pragma: no cover - defensive
+            # A sweep failure must not kill the app; the next tick retries.
+            logger.exception("artefact sweep failed")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -121,15 +154,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def request_context(request: Request, call_next: RequestResponseEndpoint) -> Response:
-        """Attach a correlation id and a structured access log line.
+        """Attach a correlation id, a structured access log line, and cache policy.
 
         Only route, method, status and duration are logged — never a body, a
         query parameter or a header value (§29).
+
+        API responses are marked uncacheable here rather than per endpoint. Every
+        API response can carry identity data or an artefact handle, and a handle
+        stops resolving the moment its artefact expires — so a cached copy would
+        outlive both the data and the consent to keep it. Setting this once means
+        a new endpoint cannot forget to.
         """
         request_id = request.headers.get(REQUEST_ID_HEADER) or new_request_id()
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = request_id
+        if request.url.path.startswith(API_PREFIX):
+            response.headers["Cache-Control"] = "no-store, private"
+            response.headers["Pragma"] = "no-cache"
         logger.info(
             "request",
             extra={

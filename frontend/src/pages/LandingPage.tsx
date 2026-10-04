@@ -6,31 +6,39 @@ import { useDocumentSession } from '../features/document-upload/DocumentSessionC
 import { Dropzone } from '../features/document-upload/Dropzone'
 import { ImagePreview } from '../features/document-upload/ImagePreview'
 import { validateDocumentImage } from '../features/document-upload/validation'
+import { useIdCardProcessing } from '../features/id-card-processing/ProcessingContext'
 
 /**
- * Landing page (§6): upload → validate → preview → continue.
+ * Landing page (§6): upload → validate → preview → process → navigate.
  *
- * Nothing leaves the device here. The preview is a deliberate checkpoint before
- * the user commits to the verification workspace, and `POST /id-card/process` is
- * Phase 3 — the Continue button navigates with the file held in session, it does
- * not transmit anything yet.
+ * The document is validated in the browser first so a bad file costs no round
+ * trip (§7), then previewed as a deliberate checkpoint. Only when the user
+ * continues is anything transmitted: `POST /api/v1/kyc/id-card/process` runs here,
+ * before the navigation, exactly as the §6 flow orders it.
  *
- * The session lives above the router (see `App`), so the file survives the
- * navigation this page performs.
+ * The result is held above the router (see `App`), so the workspace on `/id-card`
+ * renders what this page produced. A failed processing request keeps the user
+ * here with the server's own message and their file still selected, so retrying
+ * does not mean re-uploading.
  */
 export function LandingPage() {
   const navigate = useNavigate()
   const { document, accept, clear } = useDocumentSession()
-  const [error, setError] = useState<string | null>(null)
+  const { state, error: processingError, process, reset } = useIdCardProcessing()
+  const [validationError, setValidationError] = useState<string | null>(null)
   const [isValidating, setIsValidating] = useState(false)
 
+  const isProcessing = state === 'processing'
+
   const handleSelect = async (file: File) => {
-    setError(null)
+    setValidationError(null)
+    // A new selection invalidates any previous result.
+    reset()
     setIsValidating(true)
     try {
       const result = await validateDocumentImage(file)
       if (!result.ok) {
-        setError(result.message)
+        setValidationError(result.message)
         return
       }
       accept(result.file, result.dimensions)
@@ -39,10 +47,25 @@ export function LandingPage() {
     }
   }
 
+  const handleContinue = async () => {
+    if (!document) return
+    // Navigation happens only on success, so a rejected upload keeps the user here
+    // with their file still selected and the server's own sentence to act on.
+    const processed = await process(document.file)
+    if (processed) {
+      await navigate(routes.idCard)
+    }
+  }
+
   const handleClear = () => {
     clear()
-    setError(null)
+    reset()
+    setValidationError(null)
   }
+
+  // One banner: a client-side validation failure takes precedence over a stale
+  // processing failure, because it is the earlier and more actionable problem.
+  const error = validationError ?? processingError
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center p-4 sm:p-6">
@@ -56,18 +79,33 @@ export function LandingPage() {
           {document ? (
             <ImagePreview document={document} onClear={handleClear} />
           ) : (
-            <Dropzone onSelect={(file) => void handleSelect(file)} error={error} disabled={isValidating} />
+            <Dropzone
+              onSelect={(file) => void handleSelect(file)}
+              error={validationError}
+              disabled={isValidating}
+            />
           )}
         </div>
 
         {document ? (
-          <button
-            type="button"
-            className="btn-primary mt-6 w-full"
-            onClick={() => void navigate(routes.idCard)}
-          >
-            Continue to verification
-          </button>
+          <>
+            {error ? (
+              <p
+                role="alert"
+                className="border-negative bg-negative-soft text-negative mt-6 rounded-lg border px-4 py-3 text-sm font-medium"
+              >
+                {error}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="btn-primary mt-6 w-full"
+              disabled={isProcessing}
+              onClick={() => void handleContinue()}
+            >
+              {isProcessing ? 'Reading your document…' : 'Continue to verification'}
+            </button>
+          </>
         ) : null}
 
         <p className="text-ink-subtle mt-6 text-xs leading-relaxed">

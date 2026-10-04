@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Dropzone } from './Dropzone'
-import { MESSAGES } from './validation'
+import { ACCEPTED_FILE_EXTENSIONS, MESSAGES } from './validation'
 
 function getInput(container: HTMLElement): HTMLInputElement {
   const input = container.querySelector<HTMLInputElement>('input[type="file"]')
@@ -17,7 +17,9 @@ describe('Dropzone', () => {
 
     const input = screen.getByLabelText('Choose an ID Card image')
     expect(input).toHaveAttribute('type', 'file')
-    expect(input).toHaveAttribute('accept', '.jpg,.jpeg,.png')
+    // §6: JPG, JPEG, PNG and WebP.
+    expect(input).toHaveAttribute('accept', '.jpg,.jpeg,.png,.webp')
+    expect(input).toHaveAttribute('accept', ACCEPTED_FILE_EXTENSIONS)
   })
 
   it('is reachable by keyboard, not pointer-only', async () => {

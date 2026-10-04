@@ -278,8 +278,7 @@ src/
 │   ├── liveness/           (Phase 7)
 │   └── report/             (Phase 9)
 ├── components/   ui/ (design-system primitives) + verification/ (domain widgets)
-├── config/       api client, runtime config
-└── lib/          framework-agnostic helpers (validation, formatting)
+└── lib/          api client + framework-agnostic helpers (validation, formatting)
 ```
 
 Rules:
@@ -288,7 +287,7 @@ Rules:
 - Server state lives in a single query cache (TanStack Query); ephemeral UI state
   stays local. No new global store unless a requirement demands it (§33).
 - The **requirement matrix is fetched, not hard-coded** (§4).
-- All network access goes through `src/config/apiClient.ts` — one place for base
+- All network access goes through `src/lib/api.ts` — one place for base
   URL, error-envelope unwrapping and request IDs.
 - Nothing in `src/` ever reads a CamDX credential, endpoint or raw payload.
 

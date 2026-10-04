@@ -12,7 +12,21 @@ Base URL in development: `http://localhost:8000`.
 ### Content types
 
 - Requests: `application/json`, except image endpoints → `multipart/form-data`
-- Responses: `application/json` always. No endpoint returns raw CamDX payloads.
+- Responses: `application/json`, except the artefact route → the stored image's own
+  type. No endpoint returns raw CamDX payloads.
+- Uploads accept JPEG, PNG and WebP (§6). The declared content type is not
+  trusted; the bytes are identified from their magic number, so a renamed GIF is
+  rejected and a PNG sent as `image/jpeg` is accepted and reported as a PNG.
+  WebP is a RIFF container, so its `WEBP` form type is checked 8 bytes in — a
+  `RIFF` file that is not WebP (WAV, AVI) stays unrecognised.
+
+### Caching
+
+Every `/api/` response is sent with `Cache-Control: no-store, private` and
+`Pragma: no-cache`, applied by middleware rather than per endpoint. Any API
+response can carry identity data or an artefact handle that stops resolving once
+its artefact expires, so a cached copy would outlive both the data and the consent
+to keep it (§29).
 
 ### Request IDs
 
@@ -90,7 +104,7 @@ always `ok`.
 
 ## Phase 2–10 — Identity verification
 
-### `GET /api/v1/kyc/verification-methods` · Phase 5
+### `GET /api/v1/kyc/verification-methods` · Phase 5 (implemented)
 
 The requirement matrix (§11). This endpoint is the frontend's source of truth for
 what each method needs — the UI must not hard-code it.
@@ -136,84 +150,171 @@ above are the shortened camelCase form.
 
 ### `POST /api/v1/kyc/id-card/process` · Phase 3
 
-Extracts identity data via CamDX API 5 and detects the face region locally.
+Extracts identity data via the CamDigiKey OCR provider and detects the portrait
+locally with OpenCV.
 
 **Request** — `multipart/form-data`
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `file` | binary | JPG / JPEG / PNG / WebP |
-| `documentType` | enum | `khmer_id_card` (default), `passport` |
+| `document` | binary | JPEG, PNG or WebP. |
+
+The field is named `document` because the endpoint is document-specific; a
+passport endpoint takes `document` too.
+
+Only JPEG, PNG and WebP are accepted, matching the browser's own picker (§6).
+The declared content type is not trusted: the bytes are identified from their
+magic number, so a GIF or BMP renamed to `image/jpeg` is rejected as
+`UNSUPPORTED_IMAGE_TYPE`, and a PNG sent as `image/jpeg` is accepted and reported
+as a PNG.
+
+WebP dimensions are read from the container header, not by decoding. The chunk
+type selects the layout, because WebP encodes its size three ways:
+
+| Chunk | Encoding | Size lives at |
+|-------|----------|---------------|
+| `VP8 ` | lossy bitstream | bytes 26–29, 14 bits each, after the `9D 01 2A` sync code |
+| `VP8L` | lossless | 32-bit word at byte 21: 14 bits width, 14 bits height |
+| `VP8X` | extended | 24-bit little-endian canvas size at bytes 24–29 |
 
 **Response `200`**
 
 ```json
 {
-  "processingId": "proc_4b1d9f0c2a",
-  "status": "completed",
-  "document": {
-    "filename": "id-card.jpg",
-    "artifactHandle": "art_9c1e77a0",
-    "width": 1024,
-    "height": 640,
-    "expiresInSeconds": 900
-  },
+  "processingId": "proc_4b1d9f0c2a8e5d3b7a1c9e2f4d6b8a0",
+  "status": "partial",
   "ocr": {
-    "status": "completed",
-    "provider": "camdx-mock",
+    "status": "partial",
+    "documentType": "khmer_id_card",
     "fields": {
-      "nationalId": "012345678",
-      "firstNameKhmer": "សុភា",
-      "lastNameKhmer": "សាជា",
-      "firstNameEnglish": "SOPHEA",
-      "lastNameEnglish": "SACH",
-      "gender": "female",
-      "dateOfBirth": "1995-04-12",
-      "issuedDate": "2019-08-01",
-      "expiredDate": "2029-08-01"
+      "nationalId": "000000000000",
+      "firstNameKhmer": "សុខា",
+      "lastNameKhmer": "ចម",
+      "firstNameEnglish": "SAMPLE",
+      "lastNameEnglish": "PERSON",
+      "dateOfBirth": null,
+      "gender": "M",
+      "issuedDate": "2020-01-01",
+      "expiryDate": "2030-01-01"
     },
-    "unreadableFields": []
+    "missingFields": ["dateOfBirth"]
   },
   "face": {
-    "status": "detected",
+    "status": "not_detected",
     "source": "local_opencv_detection",
-    "isVerificationResult": false,
-    "artifactHandle": "art_51ab90cd",
-    "boundingBox": { "x": 612, "y": 188, "width": 214, "height": 268 },
-    "confidence": 0.87
+    "detectedCount": 0,
+    "box": null,
+    "faceRef": null,
+    "quality": null
   },
-  "warnings": [],
-  "requestId": "req_8f2c1a9e4b7d4c0f"
+  "documentRef": "art_9c1e77a0d3f24b8e9a5c7e1f3b5d7092"
 }
 ```
 
-`ocr.fields` contains only fields CamDX actually returned. Missing fields are
-absent and listed in `unreadableFields`; the UI shows "Please enter this
-information." The backend never invents a value (§16).
+`ocr.fields` contains only what OCR actually read. Every field is nullable and
+`null` means "not extracted"; `ocr.missingFields` lists those names so the UI can
+prompt for them ("Please enter this information."). The backend never invents a
+value (§16). `status` is `partial` whenever `missingFields` is non-empty — the
+two can never disagree.
 
-`face.source` is `local_opencv_detection` and `face.isVerificationResult` is
-`false` by construction (§13). There is no way for this endpoint to report a
-face verification outcome.
+The nine field names are fixed by §14 and asserted by equality in the integration
+suite, so the form's rows and this payload cannot drift apart:
+
+| Field | §14 row |
+| --- | --- |
+| `nationalId` | National ID |
+| `firstNameKhmer` | First Name — Khmer |
+| `lastNameKhmer` | Last Name — Khmer |
+| `firstNameEnglish` | First Name — English |
+| `lastNameEnglish` | Last Name — English |
+| `gender` | Gender |
+| `dateOfBirth` | Date of Birth |
+| `issuedDate` | Issued Date |
+| `expiryDate` | Expired Date |
+
+Khmer and English names are four separate values rather than a transliterated
+pair, because a Cambodian ID card prints the holder's name in both scripts and the
+two differ. All nine are editable in the browser (§14); corrections are held
+client-side and are submitted as "user information" to
+`POST /api/v1/kyc/verify`. Nothing is written server-side from the form.
+
+OCR and face detection are independent. A card whose portrait cannot be found
+still returns its identity fields, and vice versa.
+
+**The `face` object carries no verification claim (§13)**
+
+| Field | Meaning |
+|-------|---------|
+| `status` | `detected`, `not_detected`, `multiple`, or `low_quality`. |
+| `source` | Always `local_opencv_detection`. Present so the client never has to infer the provenance. |
+| `detectedCount` | Faces found. Distinguishes `multiple` from `not_detected`. |
+| `box` | Bounding box in pixels of the original image, or `null`. |
+| `faceRef` | Opaque handle to the cropped portrait. Fetch it from the artefact endpoint. |
+| `quality` | Sharpness of the crop (Laplacian variance). **Not** a match score. |
+
+There is deliberately **no** `verified`, `matchScore` or `confidence` field. A
+Haar cascade cannot produce a meaningful confidence, and naming a number
+`confidence` would invite the UI to present a local detection as a government
+result. When more than one face is present the endpoint returns `multiple` and no
+crop rather than guessing which portrait is the user.
+
+Image bytes are never inlined in the response — only opaque handles (§29).
 
 **Failure responses**
 
 | Code | HTTP | Message |
 |------|------|---------|
-| `FACE_NOT_DETECTED` | `422` | We couldn't detect a face on this ID Card. |
-| `MULTIPLE_FACES_DETECTED` | `422` | Multiple faces were detected. Please upload a valid ID Card image. |
-| `FACE_QUALITY_TOO_LOW` | `422` | The face image is unclear. Please upload a clearer ID Card. |
-| `IMAGE_UNREADABLE` | `400` | We could not read that image. Please try another file. |
-| `IMAGE_TOO_LOW_RESOLUTION` | `422` | The image quality is too low. Please upload a clearer ID Card. |
-| `IMAGE_TOO_LARGE` | `413` | The image is too large. |
-| `UNSUPPORTED_IMAGE_TYPE` | `415` | Please upload a JPG, PNG or WebP image. |
 | `OCR_UNREADABLE` | `422` | We could not read this ID Card. Please upload a clearer image. |
+| `IMAGE_UNREADABLE` | `400` | File is corrupted or cannot be read as an image. |
+| `IMAGE_TOO_LOW_RESOLUTION` | `422` | Image is too small. Minimum resolution is 640 × 480 pixels. |
+| `IMAGE_TOO_LARGE` | `413` | File is too large. Maximum size is 10 MB. |
+| `UNSUPPORTED_IMAGE_TYPE` | `415` | Please upload a JPG, PNG or WebP image. |
+
+These four messages are byte-for-byte the ones the browser shows before uploading
+(`frontend/src/features/document-upload/validation.ts`). Both layers reject the
+same problems, so a user is never told one thing by the file picker and another by
+the server. `tests/integration/test_upload_rules_contract.py` asserts it.
+
+`FACE_NOT_DETECTED`, `MULTIPLE_FACES_DETECTED` and `FACE_QUALITY_TOO_LOW` are **not**
+errors here. They are ordinary outcomes reported inside `face.status`, so a user
+with a readable card but an unclear portrait still gets their identity fields back
+instead of losing the whole submission.
+
+The resolution message is rendered from the configured `MIN_IMAGE_WIDTH` /
+`MIN_IMAGE_HEIGHT` rather than hard-coded, so it cannot drift away from the limits
+actually enforced.
 
 ---
 
-### `POST /api/v1/kyc/verify` · Phase 5+
+### `POST /api/v1/kyc/verify` · Phase 5 (implemented) / Phase 9 (full report)
 
 Runs the selected method. Validates requirements independently of the frontend
 (§11), then dispatches to the matching CamDX adapter.
+
+> **The contract below is the Phase 9 target, not today's response.** Phase 5
+> ships the endpoint, the requirement gate and a normalized outcome, but a
+> deliberately smaller body: no `verificationId`, no `methodLabel`, no
+> per-field `label`, and section `verified` booleans instead of `required` +
+> `checkedFields`. The extras exist because the report phase has not been built
+> yet — they were left out rather than stubbed with placeholder values. An
+> identity result from the running stack looks like this:
+>
+> ```json
+> {
+>   "status": "success",
+>   "method": "verify_user_info",
+>   "identity": {
+>     "fields": [
+>       { "field": "nationalId", "status": "matched", "submitted": "123456789" }
+>     ],
+>     "matchedCount": 9,
+>     "incorrectFields": []
+>   },
+>   "face": { "required": false, "verified": null },
+>   "idCard": { "required": false, "verified": null },
+>   "liveness": { "required": false, "verified": null }
+> }
+> ```
 
 **Request** `application/json`
 
@@ -333,9 +434,46 @@ fields instead of Khmer ID fields.
 
 ## Artifact streaming · Phase 3
 
-`GET /api/v1/artifacts/{handle}` streams stored bytes with
-`Cache-Control: no-store`. There is no static directory mount — that is the
-mechanism that keeps biometrics out of public reach (§29, D8).
+`GET /api/v1/kyc/artifacts/{handle}` streams stored bytes. There is no static
+directory mount — that is the mechanism that keeps biometrics out of public reach
+(§29, D8).
 
-The handle is opaque and short-lived; a guessable path yields `404`, and an
-expired handle yields `404 ARTIFACT_EXPIRED`.
+**Response `200`** — the raw image, with:
+
+| Header | Value |
+|--------|-------|
+| `Content-Type` | `image/jpeg` or `image/png`, derived from the stored bytes |
+| `Cache-Control` | `no-store, private` |
+| `Pragma` | `no-cache` |
+| `X-Content-Type-Options` | `nosniff` |
+
+The content type is sniffed from the file's magic number on every read, not taken
+from what the caller claimed when storing it and not read from a sidecar that
+could drift. A stored artefact whose type cannot be identified is refused rather
+than served under a guessed content type.
+
+`no-store` is applied to **every** `/api/` response by middleware rather than per
+endpoint. Every API response can carry identity data or a handle that stops
+resolving when its artefact expires, so a cached copy would outlive both the data
+and the consent to keep it.
+
+**Failure responses**
+
+| Code | HTTP | Message |
+|------|------|---------|
+| `ARTIFACT_NOT_FOUND` | `404` | That file could not be found. Please upload it again. |
+| `ARTIFACT_EXPIRED` | `404` | That file has expired. Please upload it again. |
+
+A malformed handle, an unknown handle and an expired one are all `404`; the
+distinction between "not found" and "expired" is only useful to the UI, which can
+say "please upload it again" either way. A path traversal attempt is not filtered
+— it is unrepresentable, because the handle is validated to a fixed shape and the
+filesystem path is never derived from caller input.
+
+**Lifecycle**
+
+Artefacts live in a `0700` directory as `0600` files, named `art_` plus 32 hex
+characters, with a configurable TTL (default 900s) and a background sweep
+(default every 60s). Reading an expired artefact deletes it immediately rather
+than waiting for the next sweep, and a stopped container sweeps and clears on
+shutdown so a volume outliving the container holds nothing.

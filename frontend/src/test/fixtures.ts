@@ -1,0 +1,210 @@
+import type { ProcessIdCardResponse, VerificationMethod } from '@/lib/api'
+
+/**
+ * The URL of a stubbed `fetch` call.
+ *
+ * `fetch` accepts a string, a `URL` or a `Request`, and `String()` on a `Request`
+ * yields `[object Object]`. Narrowing explicitly keeps the match honest and keeps
+ * the type checker out of `any` territory.
+ */
+export function urlOf(input: unknown): string {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  if (input instanceof Request) return input.url
+  return ''
+}
+
+/**
+ * A realistic `POST /api/v1/kyc/id-card/process` response (§19).
+ *
+ * Shaped like the mock provider's actual output: a Khmer ID card whose OCR is
+ * `partial` because the date of birth was not read, and a detected face. The
+ * Khmer and English names differ, as they do on a real card (§14). Tests
+ * that assert on rendering should start from this and override one field, so a
+ * change to the API contract shows up as one obvious diff instead of every test.
+ */
+export function makeProcessingResult(
+  overrides: Partial<ProcessIdCardResponse> = {},
+): ProcessIdCardResponse {
+  return {
+    processingId: 'proc_2f1c9a',
+    status: 'partial',
+    ocr: {
+      status: 'partial',
+      documentType: 'khmer_id_card',
+      fields: {
+        nationalId: '123456789',
+        firstNameKhmer: 'សុខា',
+        lastNameKhmer: 'ចម',
+        firstNameEnglish: 'Sokha',
+        lastNameEnglish: 'Cham',
+        dateOfBirth: null,
+        gender: 'F',
+        issuedDate: '2021-04-12',
+        expiryDate: '2029-04-12',
+      },
+      missingFields: ['dateOfBirth'],
+    },
+    face: {
+      status: 'detected',
+      source: 'local_opencv_detection',
+      detectedCount: 1,
+      box: { x: 312, y: 96, width: 180, height: 210 },
+      faceRef: 'art_0123456789abcdef0123456789abcdef',
+      quality: 96.4,
+    },
+    documentRef: 'art_fedcba9876543210fedcba9876543210',
+    ...overrides,
+  }
+}
+
+/**
+ * Install a `fetch` stub answering the process endpoint.
+ *
+ * Delegates to `stubKycFetch`, which also serves the methods endpoint: the
+ * workspace fetches both, and a single-endpoint stub would hand the methods call
+ * a processing payload.
+ */
+export function stubProcessingFetch(
+  result: ProcessIdCardResponse = makeProcessingResult(),
+): ReturnType<typeof vi.fn> {
+  return stubKycFetch(result)
+}
+
+/** Install a `fetch` stub that rejects with the API's own error envelope. */
+export function stubFailingFetch(
+  code: string,
+  message: string,
+  status = 422,
+): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          error: { code, message, fieldErrors: {}, requestId: 'req_abc123' },
+        }),
+        { status, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ),
+  )
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+/**
+ * The six methods with their requirements, as `GET /api/v1/kyc/verification-methods`
+ * returns them (§19).
+ *
+ * Mirrors the backend fixture set, including the phase state: only API 1 is
+ * runnable, because current-face capture is Phase 6 and liveness is Phase 7.
+ * A test that assumed otherwise would pass against a stub the real backend would
+ * contradict.
+ */
+export const VERIFICATION_METHODS: readonly VerificationMethod[] = [
+  {
+    method: 'verify_user_info',
+    officialName: 'Verify User Info',
+    label: 'Identity Information',
+    requiresUserInfo: true,
+    requiresCurrentFace: false,
+    requiresIdCard: false,
+    requiresLiveness: false,
+    requiresPassport: false,
+    isOcr: false,
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    method: 'verify_user_info_face',
+    officialName: 'Verify User Info + User Face',
+    label: 'Identity + Face',
+    requiresUserInfo: true,
+    requiresCurrentFace: true,
+    requiresIdCard: false,
+    requiresLiveness: false,
+    requiresPassport: false,
+    isOcr: false,
+    available: false,
+    unavailableReason:
+      'This method needs a current photo of your face, which this build does not capture yet.',
+  },
+  {
+    method: 'verify_user_info_idcard_face',
+    officialName: 'Verify User Info + ID Card + User Face',
+    label: 'Identity + ID Card + Face',
+    requiresUserInfo: true,
+    requiresCurrentFace: true,
+    requiresIdCard: true,
+    requiresLiveness: false,
+    requiresPassport: false,
+    isOcr: false,
+    available: false,
+    unavailableReason:
+      'This method needs a current photo of your face, which this build does not capture yet.',
+  },
+  {
+    method: 'verify_user_info_idcard_liveness',
+    officialName: 'Verify User Info + ID Card Image + Liveness',
+    label: 'Identity + ID Card + Liveness',
+    requiresUserInfo: true,
+    requiresCurrentFace: false,
+    requiresIdCard: true,
+    requiresLiveness: true,
+    requiresPassport: false,
+    isOcr: false,
+    available: false,
+    unavailableReason: 'This method needs a liveness check, which this build does not run yet.',
+  },
+  {
+    method: 'khmer_id_card_ocr',
+    officialName: 'Khmer ID Card OCR',
+    label: 'Read Cambodian ID Card',
+    requiresUserInfo: false,
+    requiresCurrentFace: false,
+    requiresIdCard: true,
+    requiresLiveness: false,
+    requiresPassport: false,
+    isOcr: true,
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    method: 'passport_ocr',
+    officialName: 'Passport OCR',
+    label: 'Read Passport',
+    requiresUserInfo: false,
+    requiresCurrentFace: false,
+    requiresIdCard: false,
+    requiresLiveness: false,
+    requiresPassport: true,
+    isOcr: true,
+    available: false,
+    unavailableReason: 'This method needs a passport image, which this build does not read yet.',
+  },
+]
+
+/** Install a `fetch` stub that answers both KYC endpoints (§19). */
+export function stubKycFetch(
+  result: ProcessIdCardResponse = makeProcessingResult(),
+  methods: readonly VerificationMethod[] = VERIFICATION_METHODS,
+): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = urlOf(input)
+    const body = url.includes('verification-methods') ? { methods } : result
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/** Parsed JSON body of a stubbed `fetch` call, typed. */
+export function bodyOf<T>(call: readonly unknown[]): T {
+  const init = call[1]
+  const body = (init as RequestInit | undefined)?.body
+  if (typeof body !== 'string') throw new Error('call had no JSON body')
+  return JSON.parse(body) as T
+}

@@ -87,11 +87,18 @@ class ErrorCode(StrEnum):
 USER_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.INVALID_REQUEST: "Something went wrong with that request. Please try again.",
     ErrorCode.NOT_FOUND: "That page could not be found.",
+    # The four upload messages are byte-for-byte the ones the browser shows
+    # (`frontend/src/features/document-upload/validation.ts`). Both layers reject
+    # the same problems, so a user who reads "Invalid file type" in the file
+    # picker must not then be told a different thing by the server — and neither
+    # may name a format we do not accept.
     ErrorCode.UNSUPPORTED_IMAGE_TYPE: "Please upload a JPG, PNG or WebP image.",
-    ErrorCode.IMAGE_TOO_LARGE: "The image is too large.",
-    ErrorCode.IMAGE_UNREADABLE: "We could not read that image. Please try another file.",
+    ErrorCode.IMAGE_TOO_LARGE: "File is too large. Maximum size is 10 MB.",
+    ErrorCode.IMAGE_UNREADABLE: "File is corrupted or cannot be read as an image.",
+    # Placeholders are filled in by the caller from the configured limits, so this
+    # text cannot drift away from `min_image_width` / `min_image_height`.
     ErrorCode.IMAGE_TOO_LOW_RESOLUTION: (
-        "The image quality is too low. Please upload a clearer ID Card."
+        "Image is too small. Minimum resolution is {min_width} \u00d7 {min_height} pixels."
     ),
     ErrorCode.REQUIREMENTS_NOT_MET: "Some required information is missing.",
     ErrorCode.INVALID_STATE_TRANSITION: "That step is not available right now.",

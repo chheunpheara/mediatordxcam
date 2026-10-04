@@ -38,6 +38,9 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y \
         libglib2.0-0 \
         libgl1 \
+        tesseract-ocr \
+        tesseract-ocr-khm \
+        tesseract-ocr-eng \
         curl \
     && rm -rf /var/lib/apt/lists/*
 

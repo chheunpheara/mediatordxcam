@@ -22,7 +22,7 @@ const goodDimensions = { width: 1280, height: 800 }
 const probeOk = vi.fn().mockResolvedValue(goodDimensions)
 
 describe('checkFileType', () => {
-  it.each(['image/jpeg', 'image/png'])('accepts %s', (type) => {
+  it.each(['image/jpeg', 'image/png', 'image/webp'])('accepts %s', (type) => {
     expect(checkFileType(makeFile({ type }))).toBeNull()
   })
 
@@ -30,7 +30,6 @@ describe('checkFileType', () => {
     'application/pdf',
     'image/gif',
     'image/heic',
-    'image/webp',
     'video/mp4',
     // A file with no declared type is not assumable to be an image.
     '',

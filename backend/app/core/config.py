@@ -101,6 +101,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    ocr_provider: str = Field(
+        default="mock",
+        description=(
+            "Mock fixtures (`mock`) or real capture via local Tesseract (`tesseract`). "
+            "Tesseract performs OCR on the real uploaded bytes; it never calls CamDX."
+        ),
+    )
+    ocr_languages: str = Field(default="eng+khm", description="Tesseract language codes.")
+
     # -- HTTP / CORS -------------------------------------------------------
     # `NoDecode` disables pydantic-settings' JSON pre-parsing for this field so a
     # plain comma-separated env value works without JSON quoting.
@@ -114,7 +123,7 @@ class Settings(BaseSettings):
         default=10 * MIB, gt=0, description="Hard cap enforced while streaming the body."
     )
     min_image_width: int = Field(default=640, ge=1, description="Minimum width in px.")
-    min_image_height: int = Field(default=400, ge=1, description="Minimum height in px.")
+    min_image_height: int = Field(default=480, ge=1, description="Minimum height in px.")
 
     # -- Temporary artefact storage (§29) ----------------------------------
     temp_storage_dir: Path = Field(
@@ -147,6 +156,14 @@ class Settings(BaseSettings):
     @classmethod
     def _upper_log_level(cls, value: str) -> str:
         return value.upper()
+
+    @field_validator("ocr_provider")
+    @classmethod
+    def _ocr_provider_supported(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in ("mock", "tesseract"):
+            raise ValueError("ocr_provider must be 'mock' or 'tesseract'")
+        return value
 
     # -- Derived helpers ---------------------------------------------------
     @property

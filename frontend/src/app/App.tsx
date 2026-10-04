@@ -1,3 +1,4 @@
+import { IdCardProcessingProvider } from '../features/id-card-processing/IdCardProcessingProvider'
 import { DocumentSessionProvider } from '../features/document-upload/DocumentSessionProvider'
 
 import { AppErrorBoundary } from './AppErrorBoundary'
@@ -10,10 +11,12 @@ import { AppRoutes } from './AppRoutes'
  * Auth, query cache and session providers arrive with the phase that needs them,
  * so nothing here is a placeholder for unused machinery.
  *
- * `DocumentSessionProvider` sits above `AppRoutes` on purpose. The document the
- * user picks on `/` has to outlive that page — `/id-card` is where it is consumed,
- * so a provider scoped to the landing page would unmount mid-navigation and take
- * the `File` with it.
+ * Both providers sit above `AppRoutes` on purpose. The document the user picks on
+ * `/` has to outlive that page — `/id-card` is where it is consumed, so a provider
+ * scoped to the landing page would unmount mid-navigation and take the `File` with
+ * it. The processing result has the same lifetime requirement: §6 processes the
+ * card and *then* navigates, so the result is produced on one route and displayed
+ * on the next.
  */
 export function App() {
   return (
@@ -22,9 +25,11 @@ export function App() {
         Skip to main content
       </a>
       <DocumentSessionProvider>
-        <div id="main-content">
-          <AppRoutes />
-        </div>
+        <IdCardProcessingProvider>
+          <div id="main-content">
+            <AppRoutes />
+          </div>
+        </IdCardProcessingProvider>
       </DocumentSessionProvider>
     </AppErrorBoundary>
   )

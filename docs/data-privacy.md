@@ -48,8 +48,13 @@ No class above is written to a Git repository, a static directory, or a log file
 - `TempArtifactStore` writes under `TEMP_STORAGE_DIR` (default `var/tmp`), which
   is **outside** every static path.
 - Files are created `0600` inside a `0700` directory.
-- The API returns an opaque handle (`art_<uuid4>`). The filesystem path never
-  crosses the API boundary, so path traversal is not expressible.
+- The API returns an opaque handle (`art_` + 32 hex characters, from `uuid4`).
+  The filesystem path never crosses the API boundary, and the handle is validated
+  to that exact shape before it is used, so path traversal is not expressible
+  rather than merely rejected.
+- The response `Content-Type` is sniffed from the stored bytes on every read, not
+  taken from the caller's claim, so a tampered or mislabelled artefact cannot be
+  served with a content type that changes how a browser treats it.
 - Uploads are not written by the web framework to a spooled temp file with a
   predictable name; the body is read into memory with a hard size cap
   (`MAX_UPLOAD_BYTES`), and the cap is enforced while streaming, before the buffer
@@ -78,7 +83,11 @@ No class above is written to a Git repository, a static directory, or a log file
 - A sweeper task runs every `TEMP_SWEEP_INTERVAL_SECONDS` (default 60) and
   deletes expired artefacts.
 - Expiry is also checked on read: an expired handle yields `404 ARTIFACT_EXPIRED`
-  even before the sweeper runs.
+  even before the sweeper runs, and reading one deletes it immediately rather than
+  waiting for the next tick.
+- Artefact responses and every `/api/` response carry `Cache-Control: no-store,
+  private` and `Pragma: no-cache`. A cached copy would outlive both the artefact and
+  the consent to keep it.
 - Artefacts become unreachable as soon as the verification reaches a terminal
   state (`success` / `partial` / `failed` / `error`) — the result is retained,
   the images are not.
@@ -92,7 +101,9 @@ No class above is written to a Git repository, a static directory, or a log file
 |-------------|-----------|
 | Public static exposure of uploads | No `StaticFiles` mount on user content; integration test asserts it |
 | Persistent biometric storage | Artefacts are temp-only; `db.py` has no biometric column and no face-embedding table |
-| Face embeddings | Not computed. `FaceExtraction` has no embedding field |
+| Face embeddings | Not computed. `FaceDetection` has no embedding field, and the response schema has no place to put one |
+| Any face "confidence" or verification claim | The `face` object has no `verified`, `matchScore` or `confidence` field; `quality` is crop sharpness and is documented as such. A Haar cascade cannot produce a meaningful confidence, and naming one would let the UI present a local detection as a government result (§13) |
+| Guessing which portrait is the user | Two or more faces yields `face.status = "multiple"` with no crop, rather than picking one |
 | Logging images or faces | `logging.py` redacts handles; image bytes are never passed to a logger |
 | Logging national IDs / names | Redaction filter on configurable patterns |
 | Logging raw CamDX payloads | `client.py` logs status and correlation id only |
@@ -100,7 +111,7 @@ No class above is written to a Git repository, a static directory, or a log file
 | Secrets in the browser | All CamDX calls are server-side (§30) |
 | Sensitive data in browser console | No `console.log` of blobs, handles or payloads; lint rule |
 | Sensitive data in URLs | Artefacts are referenced by opaque handle, never by data URL or path |
-| Uploads in Git | `.gitignore` covers `var/`, `*.jpg`, `*.png` in fixtures paths; `tests/fixtures` holds synthetic images only |
+| Uploads in Git | `.gitignore` covers `var/`, `tests/fixtures/`, `tests/e2e/artifacts/` and `uploads/`. Image fixtures are generated at test time by `tests/fixtures/images.py`, so no biometric-looking binary is committed |
 
 ---
 

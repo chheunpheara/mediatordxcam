@@ -8,9 +8,14 @@ details, chooses a verification method, supplies anything extra that method
 needs, and receives a plain-language verification report. They never see JSON, an
 endpoint, or a technical error.
 
-> **Status: Phase 1 — Foundation complete and validated.**
+> **Status: Phases 1–4 complete and validated.**
 > The app runs, the health checks pass, and the Docker stack builds and serves.
-> The upload, OCR, face detection and verification features begin in Phase 2.
+> Phase 2 (upload) and Phase 3 (ID-card processing, OCR, face detection) are done.
+> Phase 4's three-column workspace is live: the original document with zoom (§9),
+> the OpenCV-extracted face (§12), and the nine editable identity fields (§14).
+> Verification methods and the CamDigiKey verify call are implemented in Phase 5.
+> Current face capture (6), liveness (7) and passport OCR (8) are still ahead, so those
+> methods render as unavailable and say why.
 
 ---
 
@@ -99,7 +104,7 @@ docker compose up --build
 The whole product — frontend **and** API — is then at **http://localhost:8000**.
 
 ```bash
-docker compose --profile db up -d     # optional PostgreSQL (unused in Phase 1)
+docker compose --profile db up -d     # optional PostgreSQL (unused through Phase 3)
 docker compose down -v                # stop; -v also deletes biometric temp files
 ```
 
@@ -156,7 +161,7 @@ All settings live in `backend/app/core/config.py`. `.env.example` lists them all
 | `MAX_UPLOAD_BYTES` | `10485760` | Hard upload cap |
 | `TEMP_ARTIFACT_TTL_SECONDS` | `900` | Biometric artefact lifetime |
 | `TEMP_STORAGE_DIR` | `var/tmp` | Must stay outside any static mount |
-| `DATABASE_URL` | — | Declared, **unused** in Phase 1 |
+| `DATABASE_URL` | — | Declared, **unused** through Phase 3 |
 
 `.env` is git-ignored. No credential is committed, and none is ever baked into an
 image — compose reads them from the host environment.
@@ -213,6 +218,16 @@ make check
 | Integration | `backend/tests/integration/` | health, SPA serving, error envelope |
 | Component | `frontend/src/**/*.test.tsx` | routing, shell, not-found |
 | E2E | `tests/e2e/` | Scenarios A–I (added per phase) |
+
+### Phase 3 endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/v1/kyc/id-card/process` | Read identity fields, detect the portrait |
+| `GET` | `/api/v1/kyc/artifacts/{handle}` | Fetch a temporary image by opaque handle |
+
+Full contract, including why the `face` object carries no verification field:
+[docs/api.md](docs/api.md).
 
 No test contacts the real CamDigiKey service. Mock mode is forced in
 `conftest.py`. Biometric fixtures are synthetic; no real document enters the
@@ -274,10 +289,10 @@ camdx-kyc/
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Foundation, Docker, config, health | **Done** |
-| 2 | Landing page, upload, validation | Next |
-| 3 | ID Card processing, OCR, face detection | |
-| 4 | Three-column workspace, editable form | |
-| 5 | Verification method engine, CamDX adapter | |
+| 2 | Landing page, upload, validation | **Done** |
+| 3 | ID Card processing, OCR, face detection | **Done** |
+| 4 | Three-column workspace, editable form | **Done** |
+| 5 | Verification method engine, CamDX adapter | **Done** |
 | 6 | Current face capture | |
 | 7 | Liveness | |
 | 8 | Passport OCR | |

@@ -129,9 +129,11 @@ must never be committed (§22).
 | `CAMDX_API_KEY` | — | Optional, per CamDX |
 | `CAMDX_TIMEOUT` | `30` | Seconds |
 | `CAMDX_EXPOSE_DEVELOPER_VIEW` | `false` | Adds `developerView` to results (§24, D10) |
+| `OCR_PROVIDER` | `mock` | `mock` fixtures or real capture via local `tesseract` |
+| `OCR_LANGUAGES` | `eng+khm` | Tesseract language codes |
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allow-list |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Hard upload cap (§29) |
-| `MIN_IMAGE_WIDTH` / `MIN_IMAGE_HEIGHT` | `640` / `400` | Minimum resolution |
+| `MIN_IMAGE_WIDTH` / `MIN_IMAGE_HEIGHT` | `640` / `480` | Minimum resolution (must match `frontend/src/features/document-upload/validation.ts`) |
 | `TEMP_STORAGE_DIR` | `var/tmp` | Outside every static path |
 | `TEMP_ARTIFACT_TTL_SECONDS` | `900` | Biometric artefact lifetime |
 | `TEMP_SWEEP_INTERVAL_SECONDS` | `60` | Sweeper cadence |
@@ -169,7 +171,7 @@ absent. It never silently falls back to mock (§21).
 - TypeScript `strict`; no `any`
 - Feature folders own their components, hooks and types; cross-feature imports go
   through the feature's public index
-- All network access through `src/config/apiClient.ts`
+- All network access through `src/lib/api.ts`
 - Tailwind utilities for styling; no inline style objects except for dynamic
   geometry (e.g. bounding-box overlay)
 - No `console.log` of blobs, handles or payloads (§29)

@@ -4,8 +4,10 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
+import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { AppRoutes } from '@/app/AppRoutes'
 import { MAX_FILE_SIZE_BYTES, MESSAGES } from '@/features/document-upload/validation'
+import { stubFailingFetch, stubProcessingFetch } from '@/test/fixtures'
 
 /**
  * The §6 landing flow, end to end: choose → validate → preview → continue.
@@ -13,7 +15,8 @@ import { MAX_FILE_SIZE_BYTES, MESSAGES } from '@/features/document-upload/valida
  * `validateDocumentImage` decodes via `createImageBitmap`, which jsdom does not
  * implement. Stubbing it here is closer to a real browser than mocking the
  * validator would be — the production code path still runs, only the decode is
- * replaced.
+ * replaced. `fetch` is stubbed for the same reason: §6 processes the card before
+ * navigating, so the Continue button now performs a real request.
  */
 
 let decoded: { width: number; height: number } | null
@@ -27,6 +30,7 @@ beforeEach(() => {
   stubURL.createObjectURL = vi.fn(() => 'blob:mock/1')
   stubURL.revokeObjectURL = vi.fn()
   vi.stubGlobal('URL', stubURL)
+  stubProcessingFetch()
   vi.stubGlobal(
     'createImageBitmap',
     vi.fn(() =>
@@ -45,7 +49,9 @@ function renderLanding() {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <DocumentSessionProvider>
-        <AppRoutes />
+        <IdCardProcessingProvider>
+          <AppRoutes />
+        </IdCardProcessingProvider>
       </DocumentSessionProvider>
     </MemoryRouter>,
   )
@@ -163,12 +169,53 @@ describe('landing page upload flow', () => {
   })
 })
 
+describe('processing failure', () => {
+  it("shows the server's sentence and stays on the page", async () => {
+    stubFailingFetch('IMAGE_UNREADABLE', 'File is corrupted or cannot be read as an image.')
+    const { container } = renderLanding()
+
+    await userEvent.upload(
+      getInput(container),
+      new File(['x'], 'broken.jpg', { type: 'image/jpeg' }),
+    )
+    await userEvent.click(await screen.findByRole('button', { name: /continue to verification/i }))
+
+    // The user must not be navigated to a workspace with nothing in it, and must
+    // not see a status line or a JSON body (§24, §28).
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'File is corrupted or cannot be read as an image.',
+    )
+    expect(
+      screen.queryByRole('heading', { name: 'Verification workspace', level: 1 }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the chosen file so a retry does not mean re-uploading', async () => {
+    stubFailingFetch('IMAGE_TOO_LOW_RESOLUTION', 'Image is too small. Minimum resolution is 640 × 480 pixels.')
+    const { container } = renderLanding()
+
+    await userEvent.upload(
+      getInput(container),
+      new File(['x'], 'small.jpg', { type: 'image/jpeg' }),
+    )
+    await userEvent.click(await screen.findByRole('button', { name: /continue to verification/i }))
+    await screen.findByRole('alert')
+
+    expect(screen.getByText('small.jpg')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /continue to verification/i }),
+    ).toBeEnabled()
+  })
+})
+
 describe('workspace without a document', () => {
   it('sends the user back to upload rather than showing an empty workspace', () => {
     render(
       <MemoryRouter initialEntries={['/id-card']}>
         <DocumentSessionProvider>
-          <AppRoutes />
+          <IdCardProcessingProvider>
+            <AppRoutes />
+          </IdCardProcessingProvider>
         </DocumentSessionProvider>
       </MemoryRouter>,
     )
