@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { routes } from '../app/routes'
 import { DocumentColumn } from '../components/verification/DocumentColumn'
 import { ExportAction } from '../components/verification/ExportAction'
+import { PostSettingsAction } from '../components/verification/PostSettingsAction'
 import { FaceColumn } from '../components/verification/FaceColumn'
 import { IdentityForm } from '../components/verification/IdentityForm'
 import { VerificationMethodPanel } from '../components/verification/VerificationMethodPanel'
@@ -95,6 +96,7 @@ export function IdCardPage() {
             <Link className="btn-secondary py-1.5" onClick={handleBackToUpload} to={routes.landing}>
               ← Back to upload
             </Link>
+            <PostSettingsAction />
             <ExportAction />
           </div>
         </div>

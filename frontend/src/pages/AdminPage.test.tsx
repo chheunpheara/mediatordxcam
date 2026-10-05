@@ -42,6 +42,7 @@ const USERS: AuthUser[] = [
     status: 'active',
     roles: [{ id: 'role_loan', name: 'Loan Officer' }],
     isAdmin: false,
+    permissions: ['verify_user_info', 'verify_user_info_face'],
   },
 ]
 
@@ -87,6 +88,7 @@ function stubAdminFetch(options: StubOptions = {}) {
         status: 'active',
         roles: [],
         isAdmin: false,
+        permissions: [],
       }
       state.users = [...state.users, created]
       return Promise.resolve(

@@ -23,6 +23,16 @@ export const TEST_AUTH_USER: AuthUser = {
   status: 'active',
   roles: [{ id: 'role_admin', name: 'Admin' }],
   isAdmin: true,
+  // All six — the seeded Admin holds them, and it keeps the D19 posting
+  // controls visible to every test that starts from this profile.
+  permissions: [
+    'verify_user_info',
+    'verify_user_info_face',
+    'verify_user_info_idcard_face',
+    'verify_user_info_idcard_liveness',
+    'khmer_id_card_ocr',
+    'passport_ocr',
+  ],
 }
 
 

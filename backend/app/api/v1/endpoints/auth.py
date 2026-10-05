@@ -112,4 +112,8 @@ def _user_response(user: User) -> UserResponse:
         status=user.status,
         roles=[RoleSummaryResponse(id=role.id, name=role.name) for role in user.roles],
         isAdmin=user.is_admin,
+        # The merged set, so the browser can decide what a control may show
+        # without re-fetching roles (D19). Display only: the server still
+        # enforces this from the session on every request.
+        permissions=sorted(user.permissions, key=str),
     )

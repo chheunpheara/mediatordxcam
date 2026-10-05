@@ -44,6 +44,9 @@ class UserResponse(ApiModel):
     status: UserStatus
     roles: list[RoleSummaryResponse]
     isAdmin: bool = Field(description="True when any held role carries admin rights.")
+    permissions: list[VerificationMethod] = Field(
+        description="Every verification method the account may run, merged from its roles."
+    )
 
 
 class LoginResponse(ApiModel):

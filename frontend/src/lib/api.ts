@@ -263,6 +263,22 @@ export type VerificationMethodId =
   | 'khmer_id_card_ocr'
   | 'passport_ocr'
 
+/**
+ * Every verification permission, in card order (D19).
+ *
+ * The full set the server requires before it lets anyone post to core
+ * systems. Display gating only: a profile missing a permission here hides a
+ * button, and the server refuses the request regardless.
+ */
+export const ALL_VERIFICATION_METHOD_KEYS: readonly VerificationMethodId[] = [
+  'verify_user_info',
+  'verify_user_info_face',
+  'verify_user_info_idcard_face',
+  'verify_user_info_idcard_liveness',
+  'khmer_id_card_ocr',
+  'passport_ocr',
+]
+
 /** One method and the inputs it requires (§11, §19). */
 export interface VerificationMethod {
   readonly method: VerificationMethodId
@@ -414,6 +430,8 @@ export interface AuthUser {
   readonly status: UserStatus
   readonly roles: readonly AuthRoleRef[]
   readonly isAdmin: boolean
+  /** Every method this account may run, merged from its roles (D19). */
+  readonly permissions: readonly VerificationMethodId[]
 }
 
 export interface LoginResponse {
@@ -563,4 +581,67 @@ export async function setRolePermissions(
 /** `DELETE /api/v1/admin/roles/{id}` — refused while a user still holds it. */
 export async function deleteRole(id: string): Promise<void> {
   await requestJson<void>(`/api/v1/admin/roles/${encodeURIComponent(id)}`, jsonInit('DELETE'))
+}
+
+/* ------------------------------------------------------------------------- *
+ * Third-party integration settings and posting (D19)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * One configured core system. The password is write-only: the server never
+ * returns it, so a save that keeps this row's credentials sends a blank one.
+ */
+export interface IntegrationSetting {
+  readonly id: string
+  readonly url: string
+  readonly apiUser: string
+}
+
+/** One row on its way to `PUT /api/v1/integrations/settings`. */
+export interface IntegrationSettingInput {
+  readonly id?: string | null
+  readonly url: string
+  readonly apiUser: string
+  readonly apiPassword?: string
+}
+
+export interface IntegrationSettingsResponse {
+  readonly settings: readonly IntegrationSetting[]
+}
+
+/** One target that did not take the post, in safe words only (§28). */
+export interface PostToCoreFailure {
+  readonly url: string
+  readonly reason: string
+}
+
+/** Per-target outcome of `POST /api/v1/integrations/post`. */
+export interface PostToCoreResponse {
+  readonly posted: readonly string[]
+  readonly failed: readonly PostToCoreFailure[]
+}
+
+/** Every configured system (`GET /api/v1/integrations/settings`). */
+export async function fetchIntegrationSettings(): Promise<readonly IntegrationSetting[]> {
+  const body = await requestJson<IntegrationSettingsResponse>('/api/v1/integrations/settings')
+  return body.settings
+}
+
+/** `PUT /api/v1/integrations/settings` — replaces the whole list. */
+export async function saveIntegrationSettings(
+  settings: readonly IntegrationSettingInput[],
+): Promise<readonly IntegrationSetting[]> {
+  const body = await requestJson<IntegrationSettingsResponse>(
+    '/api/v1/integrations/settings',
+    jsonInit('PUT', { settings }),
+  )
+  return body.settings
+}
+
+/** `POST /api/v1/integrations/post` — replay a result to every system (D19). */
+export async function postToCore(payload: VerifyResponse): Promise<PostToCoreResponse> {
+  return requestJson<PostToCoreResponse>(
+    '/api/v1/integrations/post',
+    jsonInit('POST', { payload }),
+  )
 }
