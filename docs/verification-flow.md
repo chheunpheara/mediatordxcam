@@ -218,6 +218,9 @@ identity was rejected" (§28).
 
 - Only sections whose `required` is `true` render. Method 1 shows no face or
   liveness section.
+- Sections render as rows appended beneath the identity fields in the same list,
+  worded `Passed` / `Failed` / `Not checked` (D15), with the same icon-plus-tint
+  treatment as the field rows (§32).
 - Identity renders as a per-field table of `Field | Status` with matched rows
   carrying a check icon and mismatched rows identified in text — never by colour
   alone (§32).

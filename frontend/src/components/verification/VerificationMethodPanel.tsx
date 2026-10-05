@@ -2,6 +2,7 @@ import { useVerification } from '../../features/verification/VerificationContext
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
 import type { VerifyResponse } from '../../lib/api'
 import { FieldCheckList } from './FieldCheckList'
+import { sectionsOf } from './sectionRows'
 
 /**
  * The six official methods, as a dropdown (§9, §10).
@@ -115,22 +116,7 @@ export function VerificationMethodPanel() {
           <p className="text-ink-muted mt-1 text-xs">
             {result.identity.matchedCount} of {result.identity.fields.length} details matched.
           </p>
-          <FieldCheckList fields={result.identity.fields} />
-          {result.face.required ? (
-            <p className="text-ink-muted mt-1 text-xs">
-              Face verification: {result.face.verified === null ? 'no result' : result.face.verified ? 'passed' : 'failed'}.
-            </p>
-          ) : null}
-          {result.idCard.required ? (
-            <p className="text-ink-muted mt-1 text-xs">
-              ID card check: {result.idCard.verified === null ? 'no result' : result.idCard.verified ? 'passed' : 'failed'}.
-            </p>
-          ) : null}
-          {result.liveness.required ? (
-            <p className="text-ink-muted mt-1 text-xs">
-              Liveness check: {result.liveness.verified === null ? 'no result' : result.liveness.verified ? 'passed' : 'failed'}.
-            </p>
-          ) : null}
+          <FieldCheckList fields={result.identity.fields} sections={sectionsOf(result)} />
           <p className="text-ink-subtle mt-2 text-xs">
             This is an in-app check against the backend sample. It does not contact CamDX yet.
           </p>

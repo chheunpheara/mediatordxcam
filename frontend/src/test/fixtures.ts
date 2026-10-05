@@ -1,5 +1,6 @@
 import {
   IDENTITY_FIELDS,
+  type FaceCaptureResponse,
   type IdentityFieldOutcome,
   type ProcessIdCardResponse,
   type VerificationMethod,
@@ -220,10 +221,22 @@ export const VERIFICATION_METHODS: readonly VerificationMethod[] = [
   },
 ]
 
+/** The face-capture endpoint's payload: a signed artefact handle (§17). */
+export function makeFaceCapture(): FaceCaptureResponse {
+  return {
+    status: 'detected',
+    detectedCount: 1,
+    box: { x: 312, y: 96, width: 180, height: 210 },
+    faceRef: 'art_0a1b2c3d4e5f60718293a4b5c6d7e8f9',
+    quality: 96.4,
+  }
+}
+
 /** Install a `fetch` stub that answers both KYC endpoints (§19). */
 export function stubKycFetch(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods: readonly VerificationMethod[] = VERIFICATION_METHODS,
+  verifyResult: VerifyResponse = makeVerifyResult(),
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = urlOf(input)
@@ -231,9 +244,11 @@ export function stubKycFetch(
     // a processing payload used to crash the result card on `result.identity`.
     const body = url.includes('verification-methods')
       ? { methods }
-      : url.includes('/api/v1/kyc/verify')
-        ? makeVerifyResult()
-        : result
+      : url.includes('/api/v1/kyc/face-capture')
+        ? makeFaceCapture()
+        : url.includes('/api/v1/kyc/verify')
+          ? verifyResult
+          : result
     return Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,

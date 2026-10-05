@@ -1,8 +1,12 @@
 import type { FieldCheckStatus, IdentityFieldOutcome } from '../../lib/api'
 import { IDENTITY_FORM_FIELDS } from './identityFields'
+import type { VerificationSectionRow } from './sectionRows'
 
 /**
- * The report's identity section: one row per §14 field, `field | status` (§25).
+ * The report's list: one row per §14 field, `field | status` (§25), with the
+ * method's required sections appended beneath as their own rows (D15), so a
+ * face outcome lives in the same list as the identity fields rather than in a
+ * line of prose beside it.
  *
  * Colour never carries the meaning alone (§32): each status is a tint *plus*
  * an icon *plus* the word, so the result reads the same in greyscale and to a
@@ -12,24 +16,54 @@ import { IDENTITY_FORM_FIELDS } from './identityFields'
  */
 export function FieldCheckList({
   fields,
+  sections = [],
 }: {
   readonly fields: readonly IdentityFieldOutcome[]
+  readonly sections?: readonly VerificationSectionRow[]
 }) {
   return (
     <ul
-      aria-label="Identity field results"
+      aria-label="Verification results"
       className="border-border bg-surface divide-y text-ink mt-2 rounded-lg border text-xs"
     >
       {fields.map((entry) => (
-        <li className="flex items-center justify-between gap-3 px-3 py-1.5" key={entry.field}>
-          <span>{fieldLabel(entry.field)}</span>
-          <span className={`flex items-center gap-1.5 font-medium ${statusTone(entry.status)}`}>
-            <StatusIcon status={entry.status} />
-            {statusWord(entry.status)}
-          </span>
-        </li>
+        <Row
+          key={entry.field}
+          label={fieldLabel(entry.field)}
+          status={entry.status}
+          word={statusWord(entry.status)}
+        />
+      ))}
+      {sections.map((section) => (
+        <Row
+          key={section.label}
+          label={section.label}
+          status={section.status}
+          word={sectionWord(section.status)}
+        />
       ))}
     </ul>
+  )
+}
+
+/** One `label | status` row: the word next to the icon carries the meaning (§32). */
+function Row({
+  label,
+  status,
+  word,
+}: {
+  readonly label: string
+  readonly status: FieldCheckStatus
+  readonly word: string
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 px-3 py-1.5">
+      <span>{label}</span>
+      <span className={`flex items-center gap-1.5 font-medium ${statusTone(status)}`}>
+        <StatusIcon status={status} />
+        {word}
+      </span>
+    </li>
   )
 }
 
@@ -47,6 +81,18 @@ function statusWord(status: FieldCheckStatus): string {
       return 'Matched'
     case 'mismatch':
       return 'Mismatched'
+    case 'not_checked':
+      return 'Not checked'
+  }
+}
+
+/** Sections speak as the report phrases them (§25): passed, failed, not checked. */
+function sectionWord(status: FieldCheckStatus): string {
+  switch (status) {
+    case 'matched':
+      return 'Passed'
+    case 'mismatch':
+      return 'Failed'
     case 'not_checked':
       return 'Not checked'
   }

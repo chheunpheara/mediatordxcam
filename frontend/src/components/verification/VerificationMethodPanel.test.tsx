@@ -10,10 +10,11 @@ import {
   VERIFICATION_METHODS,
   bodyOf,
   makeProcessingResult,
+  makeVerifyResult,
   stubKycFetch,
   urlOf,
 } from '@/test/fixtures'
-import type { ProcessIdCardResponse, VerificationMethod } from '@/lib/api'
+import type { ProcessIdCardResponse, VerificationMethod, VerifyResponse } from '@/lib/api'
 
 /**
  * The verification method panel (§9, §10, §11).
@@ -55,8 +56,9 @@ function renderAt(path: string) {
 async function renderWorkspace(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods?: readonly VerificationMethod[],
+  verifyResult?: VerifyResponse,
 ) {
-  const fetchMock = stubKycFetch(result, methods)
+  const fetchMock = stubKycFetch(result, methods, verifyResult)
   const view = renderAt('/')
 
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
@@ -261,6 +263,49 @@ describe('the verify action (§11, §19)', () => {
       expect(row).toHaveTextContent('Matched')
       expect(row.querySelector('svg')).toBeTruthy()
     }
+  })
+
+  it('appends the face outcome as a row in the same list once "User info + user face" verifies (D15)', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await renderWorkspace(
+      makeProcessingResult(),
+      undefined,
+      makeVerifyResult({ method: 'verify_user_info_face', face: { required: true, verified: true } }),
+    )
+
+    // Choose the method that asks for a current face as well as identity.
+    await userEvent.selectOptions(
+      await within(await methodPanel()).findByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_face',
+    )
+
+    // Supply that face by upload — a webcam would need hardware the test lacks.
+    const upload = document.getElementById('current-face-upload')
+    await waitFor(() => expect(upload).toBeTruthy())
+    fireEvent.change(upload as HTMLInputElement, {
+      target: { files: [new File(['x'], 'face.jpg', { type: 'image/jpeg' })] },
+    })
+    await screen.findByAltText('Captured current face')
+
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+
+    const panel = await methodPanel()
+    const button = await within(panel).findByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+
+    // The nine identity rows stay; the face outcome joins them as a row rather
+    // than standing apart as prose.
+    const card = await screen.findByRole('status', { name: 'Verification result' })
+    const rows = await within(card).findAllByRole('listitem')
+    expect(rows).toHaveLength(10)
+    expect(rows[0]).toHaveTextContent('National ID')
+    expect(rows[9]).toHaveTextContent('Face verification')
+    expect(rows[9]).toHaveTextContent('Passed')
+    expect(rows[9]!.querySelector('svg')).toBeTruthy()
+    expect(within(card).queryByText(/Face verification:/)).not.toBeInTheDocument()
   })
 
   it('never shows a raw error when the backend refuses (§28)', async () => {

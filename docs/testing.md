@@ -160,6 +160,7 @@ layout change cannot quietly drop a requirement:
 | §14 all fields editable | every input enabled, including ones OCR already read |
 | §14 corrections persist | edit survives re-render; clear is honoured as a correction |
 | §14 no cross-card leakage | corrections are dropped when a different card is processed |
+| §25 section outcomes in one list | required sections append as rows beneath the nine fields; "Not checked" stays neutral |
 | §16 unread field | empty input plus "Please enter this information." |
 
 ### Why the face tests do not use a photograph
