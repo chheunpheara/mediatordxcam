@@ -236,8 +236,14 @@ export function makeFaceCapture(): FaceCaptureResponse {
 export function stubKycFetch(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods: readonly VerificationMethod[] = VERIFICATION_METHODS,
-  verifyResult: VerifyResponse = makeVerifyResult(),
+  verifyResult: VerifyResponse | VerifyResponse[] = makeVerifyResult(),
 ): ReturnType<typeof vi.fn> {
+  // An array answers successive /verify calls (last one repeats), so a test can
+  // drive run after run through the accumulated list (D16).
+  const verifyAnswers: readonly VerifyResponse[] = Array.isArray(verifyResult)
+    ? verifyResult
+    : [verifyResult]
+  let verifyCall = 0
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = urlOf(input)
     // Each endpoint gets the payload its real contract carries: handing `/verify`
@@ -247,7 +253,7 @@ export function stubKycFetch(
       : url.includes('/api/v1/kyc/face-capture')
         ? makeFaceCapture()
         : url.includes('/api/v1/kyc/verify')
-          ? verifyResult
+          ? verifyAnswers[Math.min(verifyCall++, verifyAnswers.length - 1)]!
           : result
     return Promise.resolve(
       new Response(JSON.stringify(body), {

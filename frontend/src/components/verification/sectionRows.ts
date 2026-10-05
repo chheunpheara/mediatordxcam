@@ -7,26 +7,34 @@ export interface VerificationSectionRow {
 }
 
 /**
- * The method's required sections as rows for the status list (D15): Face, ID
- * card, then Liveness. A section the method did not ask for contributes
- * nothing, and `verified: null` stays the neutral dash — §25 forbids showing an
- * unknown result as a failure.
+ * The session's section rows, accumulated across every run (D16): each method
+ * reports only the sections it required, so a row appears the first time a
+ * method reports that section, its status refreshes on later runs, and a
+ * section a later method does not ask about keeps the row it already earned.
+ * Order is first-appearance.
+ *
+ * `verified: null` stays the neutral dash — §25 forbids showing an unknown
+ * result as a failure.
  */
-export function sectionsOf(result: VerifyResponse): readonly VerificationSectionRow[] {
-  const sections = [
-    { label: 'Face verification', outcome: result.face },
-    { label: 'ID card check', outcome: result.idCard },
-    { label: 'Liveness check', outcome: result.liveness },
-  ]
-  return sections
-    .filter((section) => section.outcome.required)
-    .map((section) => ({
-      label: section.label,
-      status:
+export function sectionsOf(results: readonly VerifyResponse[]): readonly VerificationSectionRow[] {
+  const rows = new Map<string, FieldCheckStatus>()
+  for (const result of results) {
+    const sections = [
+      { label: 'Face verification', outcome: result.face },
+      { label: 'ID card check', outcome: result.idCard },
+      { label: 'Liveness check', outcome: result.liveness },
+    ]
+    for (const section of sections) {
+      if (!section.outcome.required) continue
+      const status =
         section.outcome.verified === null
           ? 'not_checked'
           : section.outcome.verified
             ? 'matched'
-            : 'mismatch',
-    }))
+            : 'mismatch'
+      // Re-setting an existing key refreshes its status but keeps its position.
+      rows.set(section.label, status)
+    }
+  }
+  return [...rows].map(([label, status]) => ({ label, status }))
 }

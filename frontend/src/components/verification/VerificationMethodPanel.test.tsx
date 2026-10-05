@@ -56,7 +56,7 @@ function renderAt(path: string) {
 async function renderWorkspace(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods?: readonly VerificationMethod[],
-  verifyResult?: VerifyResponse,
+  verifyResult?: VerifyResponse | VerifyResponse[],
 ) {
   const fetchMock = stubKycFetch(result, methods, verifyResult)
   const view = renderAt('/')
@@ -265,21 +265,31 @@ describe('the verify action (§11, §19)', () => {
     }
   })
 
-  it('appends the face outcome as a row in the same list once "User info + user face" verifies (D15)', async () => {
+  it('grows the same list when the face method verifies after "Verify User Info" (D16)', async () => {
     const { default: userEvent } = await import('@testing-library/user-event')
-    await renderWorkspace(
-      makeProcessingResult(),
-      undefined,
+    await renderWorkspace(makeProcessingResult(), undefined, [
+      makeVerifyResult(),
       makeVerifyResult({ method: 'verify_user_info_face', face: { required: true, verified: true } }),
-    )
+    ])
 
-    // Choose the method that asks for a current face as well as identity.
+    // First run: the default "Verify User Info" — nine identity rows.
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+    const panel = await methodPanel()
+    const button = await within(panel).findByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+
+    const card = await screen.findByRole('status', { name: 'Verification result' })
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(9))
+
+    // Second run: choose the face method, supply its face, verify again. The
+    // identity rows stay in the same list; the face outcome appends beneath.
     await userEvent.selectOptions(
-      await within(await methodPanel()).findByRole('combobox', { name: 'Verification method' }),
+      await within(panel).findByRole('combobox', { name: 'Verification method' }),
       'verify_user_info_face',
     )
-
-    // Supply that face by upload — a webcam would need hardware the test lacks.
     const upload = document.getElementById('current-face-upload')
     await waitFor(() => expect(upload).toBeTruthy())
     fireEvent.change(upload as HTMLInputElement, {
@@ -287,25 +297,85 @@ describe('the verify action (§11, §19)', () => {
     })
     await screen.findByAltText('Captured current face')
 
+    const retry = await within(panel).findByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(retry).toBeEnabled())
+    await userEvent.click(retry)
+
+    // Nine shared identity rows plus the appended face row — not a new list.
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(10))
+    const rows = within(card).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('National ID')
+    expect(rows[0]).toHaveTextContent('Matched')
+    expect(rows[9]).toHaveTextContent('Face verification')
+    expect(rows[9]!).toHaveTextContent('Passed')
+    expect(rows[9]!.querySelector('svg')).toBeTruthy()
+    expect(within(card).queryByText(/Face verification:/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the previous result on screen when a later verify is refused (§28, D16)', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+
+    let verifyCalls = 0
+    const fetchMock = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = urlOf(input)
+      const ok = (body: unknown) =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      if (url.includes('/api/v1/kyc/verify')) {
+        verifyCalls += 1
+        if (verifyCalls > 1) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: {
+                  code: 'REQUIREMENTS_NOT_MET',
+                  message: 'Some required information is missing.',
+                  missing: ['currentFace'],
+                  fieldErrors: {},
+                  requestId: 'req_2',
+                },
+              }),
+              { status: 422, headers: { 'Content-Type': 'application/json' } },
+            ),
+          )
+        }
+        return ok(makeVerifyResult())
+      }
+      if (url.includes('verification-methods')) return ok({ methods: VERIFICATION_METHODS })
+      return ok(makeProcessingResult())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const view = renderAt('/')
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(() => Promise.resolve({ width: 1280, height: 800, close: vi.fn() })),
+    )
+    await userEvent.upload(input, new File(['x'], 'card.jpg', { type: 'image/jpeg' }))
+    await userEvent.click(await screen.findByRole('button', { name: /continue to verification/i }))
+
     fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
       target: { value: '1994-02-11' },
     })
-
     const panel = await methodPanel()
     const button = await within(panel).findByRole('button', { name: 'Verify' })
     await waitFor(() => expect(button).toBeEnabled())
     await userEvent.click(button)
 
-    // The nine identity rows stay; the face outcome joins them as a row rather
-    // than standing apart as prose.
     const card = await screen.findByRole('status', { name: 'Verification result' })
-    const rows = await within(card).findAllByRole('listitem')
-    expect(rows).toHaveLength(10)
-    expect(rows[0]).toHaveTextContent('National ID')
-    expect(rows[9]).toHaveTextContent('Face verification')
-    expect(rows[9]).toHaveTextContent('Passed')
-    expect(rows[9]!.querySelector('svg')).toBeTruthy()
-    expect(within(card).queryByText(/Face verification:/)).not.toBeInTheDocument()
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(9))
+
+    // The retry is refused — the list from the first run must survive it.
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Verify' }))
+    expect(await within(panel).findByRole('alert')).toHaveTextContent(
+      'Some required information is missing.',
+    )
+    expect(within(card).getAllByRole('listitem')).toHaveLength(9)
   })
 
   it('never shows a raw error when the backend refuses (§28)', async () => {

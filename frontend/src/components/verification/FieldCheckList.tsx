@@ -4,9 +4,9 @@ import type { VerificationSectionRow } from './sectionRows'
 
 /**
  * The report's list: one row per §14 field, `field | status` (§25), with the
- * method's required sections appended beneath as their own rows (D15), so a
- * face outcome lives in the same list as the identity fields rather than in a
- * line of prose beside it.
+ * session's section outcomes appended beneath as their own rows (D15) — one
+ * shared list where a face outcome lives beside the identity fields rather
+ * than in a line of prose, and survives later runs (D16).
  *
  * Colour never carries the meaning alone (§32): each status is a tint *plus*
  * an icon *plus* the word, so the result reads the same in greyscale and to a

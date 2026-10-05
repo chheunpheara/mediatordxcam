@@ -8,8 +8,9 @@ import { sectionsOf } from './sectionRows'
 
 /**
  * The §25 report's rows (verification-flow: `field | status`, icons paired with
- * words, `not_checked` never rendered as a failure — §32), plus the method's
- * required sections appended beneath the fields as rows (D15).
+ * words, `not_checked` never rendered as a failure — §32), plus the session's
+ * section rows appended beneath the fields (D15) and accumulated across runs
+ * (D16).
  */
 
 function outcome(
@@ -120,24 +121,45 @@ describe('FieldCheckList', () => {
 })
 
 describe('sectionsOf', () => {
-  it('turns each required section into a row, in Face, ID card, Liveness order', () => {
-    const rows = sectionsOf(
+  it('adds a row the first time a run reports that section, in Face, ID card, Liveness order', () => {
+    const rows = sectionsOf([
+      makeVerifyResult(),
       makeVerifyResult({
+        method: 'verify_user_info_face',
         face: { required: true, verified: true },
         liveness: { required: true, verified: false },
       }),
-    )
+    ])
 
     expect(rows.map((row) => row.label)).toEqual(['Face verification', 'Liveness check'])
     expect(rows.map((row) => row.status)).toEqual(['matched', 'mismatch'])
   })
 
-  it('leaves out sections the method did not require — method 1 shows no face row', () => {
-    expect(sectionsOf(makeVerifyResult())).toEqual([])
+  it('refreshes a row when a later run reports the section again, keeping its place', () => {
+    const rows = sectionsOf([
+      makeVerifyResult({ face: { required: true, verified: true } }),
+      makeVerifyResult({ face: { required: true, verified: false } }),
+    ])
+
+    expect(rows).toEqual([{ label: 'Face verification', status: 'mismatch' }])
+  })
+
+  it('keeps a section a later method does not ask about — one shared list (D16)', () => {
+    const rows = sectionsOf([
+      makeVerifyResult({ method: 'verify_user_info_face', face: { required: true, verified: true } }),
+      makeVerifyResult(),
+    ])
+
+    expect(rows).toEqual([{ label: 'Face verification', status: 'matched' }])
+  })
+
+  it('leaves out sections no run ever required — method 1 alone shows no face row', () => {
+    expect(sectionsOf([makeVerifyResult()])).toEqual([])
+    expect(sectionsOf([])).toEqual([])
   })
 
   it('maps a required section with no result to not_checked, never a failure (§25)', () => {
-    expect(sectionsOf(makeVerifyResult({ face: { required: true, verified: null } }))).toEqual([
+    expect(sectionsOf([makeVerifyResult({ face: { required: true, verified: null } })])).toEqual([
       { label: 'Face verification', status: 'not_checked' },
     ])
   })

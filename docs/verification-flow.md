@@ -221,6 +221,10 @@ identity was rejected" (§28).
 - Sections render as rows appended beneath the identity fields in the same list,
   worded `Passed` / `Failed` / `Not checked` (D15), with the same icon-plus-tint
   treatment as the field rows (§32).
+- The list accumulates within the session (D16): identity rows always reflect
+  the latest run, a section row appears the first time a method reports that
+  section and keeps its place when later runs do not re-report it, and a
+  refused retry leaves the previous list on screen rather than clearing it.
 - Identity renders as a per-field table of `Field | Status` with matched rows
   carrying a check icon and mismatched rows identified in text — never by colour
   alone (§32).

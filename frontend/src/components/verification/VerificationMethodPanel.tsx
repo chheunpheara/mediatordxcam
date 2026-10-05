@@ -18,8 +18,18 @@ import { sectionsOf } from './sectionRows'
  * fewer than it does.
  */
 export function VerificationMethodPanel() {
-  const { methods, selected, select, blockingReason, canVerify, verifying, verify, error, result } =
-    useVerification()
+  const {
+    methods,
+    selected,
+    select,
+    blockingReason,
+    canVerify,
+    verifying,
+    verify,
+    error,
+    result,
+    history,
+  } = useVerification()
 
   const chosen = methods.find((m) => m.method === selected) ?? null
 
@@ -116,7 +126,7 @@ export function VerificationMethodPanel() {
           <p className="text-ink-muted mt-1 text-xs">
             {result.identity.matchedCount} of {result.identity.fields.length} details matched.
           </p>
-          <FieldCheckList fields={result.identity.fields} sections={sectionsOf(result)} />
+          <FieldCheckList fields={result.identity.fields} sections={sectionsOf(history)} />
           <p className="text-ink-subtle mt-2 text-xs">
             This is an in-app check against the backend sample. It does not contact CamDX yet.
           </p>

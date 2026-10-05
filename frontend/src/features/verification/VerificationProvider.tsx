@@ -50,8 +50,12 @@ export function VerificationProvider({
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<VerificationMethodId | null>(null)
   const [verifying, setVerifying] = useState(false)
-  const [result, setResult] = useState<VerifyResponse | null>(null)
+  const [history, setHistory] = useState<readonly VerifyResponse[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // The latest run drives the identity rows; earlier runs stay in `history`
+  // so their section outcomes can keep their place in the list (D16).
+  const result = history[history.length - 1] ?? null
 
   const { identity, documentRef, currentFaceRef, livenessRef, idCardFaceRef } = inputs
 
@@ -114,18 +118,18 @@ export function VerificationProvider({
     setVerifying(true)
     setError(null)
     try {
-      setResult(
-        await verify({
-          method: chosen.method,
-          ...(identity === null ? {} : { userInformation: identity }),
-          idCardRef: documentRef,
-          currentFaceRef,
-          livenessRef,
-          idCardFaceRef,
-        }),
-      )
+      const outcome = await verify({
+        method: chosen.method,
+        ...(identity === null ? {} : { userInformation: identity }),
+        idCardRef: documentRef,
+        currentFaceRef,
+        livenessRef,
+        idCardFaceRef,
+      })
+      setHistory((prev) => [...prev, outcome])
     } catch (cause) {
-      setResult(null)
+      // The list already on screen stays (D16): a refused retry must not wipe
+      // a result the user has already read. Only the server's sentence shows.
       setError(cause instanceof ApiError ? cause.message : 'Something went wrong. Please try again.')
     } finally {
       setVerifying(false)
@@ -133,7 +137,7 @@ export function VerificationProvider({
   }, [chosen, identity, documentRef, currentFaceRef, livenessRef, idCardFaceRef])
 
   const reset = useCallback(() => {
-    setResult(null)
+    setHistory([])
     setError(null)
   }, [])
 
@@ -147,11 +151,12 @@ export function VerificationProvider({
       blockingReason,
       verifying,
       result,
+      history,
       error,
       verify: runVerify,
       reset,
     }),
-    [methods, selected, missing, chosen, blockingReason, verifying, result, error, runVerify, reset],
+    [methods, selected, missing, chosen, blockingReason, verifying, result, history, error, runVerify, reset],
   )
 
   return <VerificationContext value={value}>{children}</VerificationContext>

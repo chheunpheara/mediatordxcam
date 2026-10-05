@@ -31,6 +31,15 @@ export interface VerificationValue {
   readonly blockingReason: string | null
   readonly verifying: boolean
   readonly result: VerifyResponse | null
+  /**
+   * Every successful verification this session ran, in order (D16).
+   *
+   * The report's identity rows render from `result` — the latest run, so a
+   * retry refreshes them — while section rows accumulate across the history:
+   * a face outcome from an earlier run is not lost when a later method does
+   * not ask about faces.
+   */
+  readonly history: readonly VerifyResponse[]
   /** Already user-facing. Rendered as-is; never a raw error (§24, §28). */
   readonly error: string | null
   readonly verify: () => Promise<void>
