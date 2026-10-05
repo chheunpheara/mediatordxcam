@@ -28,6 +28,7 @@ from app.services.identity_registry import IdentityRegistry
 from app.services.integrations import IntegrationService
 from app.services.kyc import KycService
 from app.services.local_ocr import LocalTesseractOcrProvider
+from app.services.records import RecordService
 
 #: The session cookie set at login (D18). `HttpOnly`, so no browser script can
 #: read it — the frontend never references this name.
@@ -243,6 +244,22 @@ def integration_service_provider(request: Request, settings: SettingsDep) -> Int
 
 
 IntegrationServiceDep = Annotated[IntegrationService, Depends(integration_service_provider)]
+
+
+def record_service_provider(request: Request, settings: SettingsDep) -> RecordService:
+    """The uploaded-record service (D23), built once per application.
+
+    Cached on `app.state` like the account service; construction creates the
+    store's schema, so FastAPI runs this sync provider in a worker thread.
+    """
+    cached: RecordService | None = getattr(request.app.state, "record_service", None)
+    if cached is None:
+        cached = RecordService(settings)
+        request.app.state.record_service = cached
+    return cached
+
+
+RecordServiceDep = Annotated[RecordService, Depends(record_service_provider)]
 
 
 async def require_core_post(user: CurrentUserDep) -> User:

@@ -304,6 +304,116 @@ logged.
 
 ---
 
+## Uploaded records · D23
+
+Bulk verification data, in five endpoints. Unlike `/integrations`, every
+route here needs only a signed-in account (`· authenticated`): the Loan
+Officer who verifies one identity at a time is the same person uploading the
+batch. The CSV or Excel file itself never reaches the server — the browser
+parses it, the mapping step pairs its columns with the nine §14 fields, and
+only the resulting values are submitted (§29). Records and the saved mapping
+share the auth database with everything else.
+
+### `GET /api/v1/records` · authenticated
+
+One page of the list, newest first, with everything the list's controls send
+in a single call:
+
+| Query | Meaning |
+|-------|---------|
+| `search` | Case-insensitive substring across the record's *values* (0-200 chars; field names are never searched) |
+| `status` | `pending` or `verified`; omitted keeps both |
+| `limit` | Page size, 1-50 (default 10) |
+| `offset` | Rows to skip (default 0) |
+
+```json
+{
+  "records": [
+    {
+      "id": "3f2a…",
+      "status": "pending",
+      "values": {
+        "nationalId": "123456789",
+        "firstNameKhmer": "ចាន់",
+        "lastNameKhmer": "សុខ",
+        "firstNameEnglish": "Chann",
+        "lastNameEnglish": "Sok",
+        "gender": "Female",
+        "dateOfBirth": "2000-01-01",
+        "issuedDate": "2020-01-01",
+        "expiryDate": "2030-01-01"
+      },
+      "verification": null,
+      "createdAt": 1769900000.0,
+      "verifiedAt": null
+    }
+  ],
+  "total": 1
+}
+```
+
+`total` is how many records the filter matched in total, not this page's
+length. An unknown `status`, a `limit` outside 1-50 or a `search` over 200
+characters is `400 INVALID_REQUEST`.
+
+### `POST /api/v1/records` · authenticated
+
+Add the reviewed rows from the dialog's last step:
+
+```json
+{ "records": [ { "nationalId": "123456789", "firstNameEnglish": "Chann" } ] }
+```
+
+Each entry is the nine §14 field names, any subset of them (absent fields are
+stored as blanks); 1-500 entries per submission, answered `201` with what was
+created. A record whose every value is blank is refused — it could never be
+verified — as `400` with `fieldErrors` keyed `records.<index>.values`, and a
+stray key lands at `records.<index>.<key>` (schema `extra=forbid`).
+
+### `POST /api/v1/records/{record_id}/verification` · authenticated
+
+Store the outcome of a run whose record was on screen, flipping its Status to
+`verified`:
+
+```json
+{
+  "verification": {
+    "status": "success",
+    "method": "verify_user_info",
+    "identity": { "fields": [], "matchedCount": 9, "incorrectFields": [] },
+    "face": { "required": false },
+    "idCard": { "required": false },
+    "liveness": { "required": false }
+  }
+}
+```
+
+`verification` is exactly what `POST /api/v1/kyc/verify` returned — the same
+`VerifyResponse`, no more — and the response is the record with
+`status: "verified"`, the stored outcome and a server-stamped `verifiedAt`
+that Preview later renders. An unknown id is `404 NOT_FOUND`; a stray key in
+the outcome is `400` keyed `verification.<key>`.
+
+### `GET /api/v1/records/mappings` · authenticated
+
+The one reusable column mapping, or `null` if nothing was saved yet:
+
+```json
+{ "mapping": { "ID Number": "nationalId", "DOB": "dateOfBirth" } }
+```
+
+### `PUT /api/v1/records/mappings` · authenticated
+
+Replace it — keys are file column names, values must be §14 field names.
+The dialog pre-applies this mapping to the next file whose columns line up,
+which is why there is exactly one (like the posting settings): one house
+template, re-editable by hand whenever a file differs. A column mapping to an
+unknown field is `400` keyed `mapping.<column>`; the same field claimed twice
+is `400` keyed by the column that repeated it; a blank column name is `400`
+keyed `mapping`.
+
+---
+
 ## Phase 1 — Health
 
 ### `GET /health`

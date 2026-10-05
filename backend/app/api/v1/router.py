@@ -6,7 +6,8 @@ verify endpoints; liveness and passport routers arrive with the
 phases that implement them.
 
 Auth (`/auth`) and administration (`/admin`) arrived with D18; third-party
-posting settings (`/integrations`) with D19. Health stays
+posting settings (`/integrations`) with D19; uploaded records (`/records`)
+with D23. Health stays
 outside every guard: Docker's healthcheck has no session, and a probe that
 needs to sign in stops being a probe.
 """
@@ -23,6 +24,7 @@ from app.api.v1.endpoints import (
     health,
     id_card,
     integrations,
+    records,
     verification,
 )
 
@@ -31,6 +33,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(admin.router)
 api_router.include_router(integrations.router)
+api_router.include_router(records.router)
 api_router.include_router(id_card.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(verification.router)
