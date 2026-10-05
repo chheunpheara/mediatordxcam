@@ -1,0 +1,24 @@
+[
+    {
+        "id_card": "010234567",
+        "khmer_first_name": "ឈាង",
+        "khmer_last_name": "សុវណ្ណា",
+        "english_first_name": "CHHEANG",
+        "english_last_name": "SOVANN",
+        "gender": "M",
+        "dob": "05/12/1995",
+        "issued_date": "01/15/2022",
+        "expired_date": "01/15/2032"
+    },
+    {
+        "id_card": "010234244",
+        "khmer_first_name": "ឈឺន",
+        "khmer_last_name": "ភារើន",
+        "english_first_name": "CHHEUN",
+        "english_last_name": "PHEARAEUN",
+        "gender": "M",
+        "dob": "05/12/1988",
+        "issued_date": "01/15/2022",
+        "expired_date": "01/15/2032"
+    }
+]
