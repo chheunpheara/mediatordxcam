@@ -382,3 +382,34 @@ describe('workspace behaviour', () => {
     expect(await screen.findByLabelText(/^National ID/)).toHaveValue('123456789')
   })
 })
+describe('export (D17)', () => {
+  it('sits beside Back to upload, disabled until a run produces a result', async () => {
+    await renderWorkspaceWithResult()
+
+    expect(screen.getByRole('link', { name: /back to upload/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+  })
+
+  it('opens the dialog with the verified data once verification finishes', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await renderWorkspaceWithResult()
+
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+    const panel = await screen.findByRole('region', { name: /verification method/i })
+    const verify = within(panel).getByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(verify).toBeEnabled())
+    await userEvent.click(verify)
+
+    const exportButton = screen.getByRole('button', { name: 'Export' })
+    await waitFor(() => expect(exportButton).toBeEnabled())
+    await userEvent.click(exportButton)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Export verified data' })
+    expect(within(dialog).getByRole('table')).toBeInTheDocument()
+    // The stub's result: nine values, nine statuses, method and overall status.
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(20)
+    expect(within(dialog).getAllByRole('checkbox').every((box) => (box as HTMLInputElement).checked)).toBe(true)
+  })
+})

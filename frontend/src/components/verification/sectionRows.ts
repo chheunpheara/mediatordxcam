@@ -7,6 +7,21 @@ export interface VerificationSectionRow {
 }
 
 /**
+ * The three sections, keyed for exports and labelled for display — one source
+ * so a column picker and the list can never name a section differently.
+ */
+export const SECTION_COLUMNS = [
+  { key: 'faceCheck', label: 'Face verification' },
+  { key: 'idCardCheck', label: 'ID card check' },
+  { key: 'livenessCheck', label: 'Liveness check' },
+] as const
+
+/** The export key for a section row's label, or `null` if it is not one. */
+export function sectionKeyFor(label: string): string | null {
+  return SECTION_COLUMNS.find((column) => column.label === label)?.key ?? null
+}
+
+/**
  * The session's section rows, accumulated across every run (D16): each method
  * reports only the sections it required, so a row appears the first time a
  * method reports that section, its status refreshes on later runs, and a
@@ -19,11 +34,11 @@ export interface VerificationSectionRow {
 export function sectionsOf(results: readonly VerifyResponse[]): readonly VerificationSectionRow[] {
   const rows = new Map<string, FieldCheckStatus>()
   for (const result of results) {
-    const sections = [
-      { label: 'Face verification', outcome: result.face },
-      { label: 'ID card check', outcome: result.idCard },
-      { label: 'Liveness check', outcome: result.liveness },
-    ]
+    const sections = SECTION_COLUMNS.map((column) => {
+      if (column.key === 'faceCheck') return { label: column.label, outcome: result.face }
+      if (column.key === 'idCardCheck') return { label: column.label, outcome: result.idCard }
+      return { label: column.label, outcome: result.liveness }
+    })
     for (const section of sections) {
       if (!section.outcome.required) continue
       const status =

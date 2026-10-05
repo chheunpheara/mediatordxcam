@@ -1,6 +1,7 @@
 import type { FieldCheckStatus, IdentityFieldOutcome } from '../../lib/api'
-import { IDENTITY_FORM_FIELDS } from './identityFields'
+import { fieldLabel } from './identityFields'
 import type { VerificationSectionRow } from './sectionRows'
+import { sectionWord, statusWord } from './statusDisplay'
 
 /**
  * The report's list: one row per §14 field, `field | status` (§25), with the
@@ -65,37 +66,6 @@ function Row({
       </span>
     </li>
   )
-}
-
-/** §14's field names as the form already labels them; unknown names still read as words. */
-function fieldLabel(field: string): string {
-  const known = IDENTITY_FORM_FIELDS.find((row) => row.name === field)
-  if (known) return known.label
-  const words = field.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
-  return words.charAt(0).toUpperCase() + words.slice(1)
-}
-
-function statusWord(status: FieldCheckStatus): string {
-  switch (status) {
-    case 'matched':
-      return 'Matched'
-    case 'mismatch':
-      return 'Mismatched'
-    case 'not_checked':
-      return 'Not checked'
-  }
-}
-
-/** Sections speak as the report phrases them (§25): passed, failed, not checked. */
-function sectionWord(status: FieldCheckStatus): string {
-  switch (status) {
-    case 'matched':
-      return 'Passed'
-    case 'mismatch':
-      return 'Failed'
-    case 'not_checked':
-      return 'Not checked'
-  }
 }
 
 function statusTone(status: FieldCheckStatus): string {

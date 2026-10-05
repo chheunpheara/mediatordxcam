@@ -29,3 +29,11 @@ export const IDENTITY_FORM_FIELDS: readonly IdentityFormField[] = [
   { name: 'issuedDate', label: 'Issued Date', hint: 'YYYY-MM-DD', required: true, kind: 'date' },
   { name: 'expiryDate', label: 'Expired Date', hint: 'YYYY-MM-DD', required: true, kind: 'date' },
 ]
+
+/** §14's field names as the form already labels them; unknown names still read as words. */
+export function fieldLabel(field: string): string {
+  const known = IDENTITY_FORM_FIELDS.find((row) => row.name === field)
+  if (known) return known.label
+  const words = field.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { routes } from '../app/routes'
 import { DocumentColumn } from '../components/verification/DocumentColumn'
+import { ExportAction } from '../components/verification/ExportAction'
 import { FaceColumn } from '../components/verification/FaceColumn'
 import { IdentityForm } from '../components/verification/IdentityForm'
 import { VerificationMethodPanel } from '../components/verification/VerificationMethodPanel'
@@ -28,6 +29,12 @@ import { clearSession } from '../lib/session'
  * direct visit to `/id-card` — a refresh, a bookmark — has a document in session
  * but no result, so the call is made here too instead of showing an empty
  * workspace.
+ *
+ * The header pairs "Back to upload" with Export (D17): once a run has produced
+ * a result, its dialog offers the session's verified data as xlsx, csv or json,
+ * with every column selected by default so an untouched export carries all of
+ * it. The provider wraps the whole page so both the method panel and the
+ * header's export action read the same session state.
  *
  * Verification can only start once the chosen method's own inputs are present.
  * Today that means API 1: current-face capture is Phase 6 and liveness is Phase 7,
@@ -73,51 +80,54 @@ export function IdCardPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Verification workspace</h1>
-        <Link className="btn-secondary py-1.5" onClick={handleBackToUpload} to={routes.landing}>
-          ← Back to upload
-        </Link>
-      </div>
-
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
-        {/* Column 1 (D14): the card, and the face cut from it beneath. */}
-        <div className="flex flex-col gap-4">
-          <DocumentColumn
-            documentRef={result?.documentRef ?? null}
-            fileName={document.file.name}
-            height={document.dimensions.height}
-            state={state}
-            width={document.dimensions.width}
-          />
-          <FaceColumn face={result?.face ?? null} />
+      <VerificationProvider
+        inputs={{
+          identity: result === null ? null : resolveIdentity(result.ocr.fields, draft),
+          documentRef: result?.documentRef ?? null,
+          currentFaceRef: faceCapture.faceRef,
+          livenessRef: null,
+          idCardFaceRef: result?.face?.faceRef ?? null,
+        }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-xl font-semibold">Verification workspace</h1>
+          <div className="flex items-center gap-2">
+            <Link className="btn-secondary py-1.5" onClick={handleBackToUpload} to={routes.landing}>
+              ← Back to upload
+            </Link>
+            <ExportAction />
+          </div>
         </div>
 
-        {/* Column 2 (D14): the nine editable identity fields. */}
-        {result ? (
-          <IdentityForm hasDraft={Object.keys(draft).length > 0} ocr={result.ocr} />
-        ) : (
-          <section className="card p-5" aria-label="Identity information">
-            <h2 className="text-ink-subtle text-sm font-semibold">Identity Information</h2>
-            <p className="text-ink-subtle mt-3 text-xs" role="status">
-              {state === 'processing' ? 'Reading your document…' : 'Not available yet.'}
-            </p>
-          </section>
-        )}
+        <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
+          {/* Column 1 (D14): the card, and the face cut from it beneath. */}
+          <div className="flex flex-col gap-4">
+            <DocumentColumn
+              documentRef={result?.documentRef ?? null}
+              fileName={document.file.name}
+              height={document.dimensions.height}
+              state={state}
+              width={document.dimensions.width}
+            />
+            <FaceColumn face={result?.face ?? null} />
+          </div>
 
-        {/* Column 3 (D14): method picker and Verify. */}
-        <VerificationProvider
-          inputs={{
-            identity: result === null ? null : resolveIdentity(result.ocr.fields, draft),
-            documentRef: result?.documentRef ?? null,
-            currentFaceRef: faceCapture.faceRef,
-            livenessRef: null,
-            idCardFaceRef: result?.face?.faceRef ?? null,
-          }}
-        >
+          {/* Column 2 (D14): the nine editable identity fields. */}
+          {result ? (
+            <IdentityForm hasDraft={Object.keys(draft).length > 0} ocr={result.ocr} />
+          ) : (
+            <section className="card p-5" aria-label="Identity information">
+              <h2 className="text-ink-subtle text-sm font-semibold">Identity Information</h2>
+              <p className="text-ink-subtle mt-3 text-xs" role="status">
+                {state === 'processing' ? 'Reading your document…' : 'Not available yet.'}
+              </p>
+            </section>
+          )}
+
+          {/* Column 3 (D14): method picker and Verify. */}
           <VerificationMethodPanel />
-        </VerificationProvider>
-      </div>
+        </div>
+      </VerificationProvider>
 
       {error ? (
         <div className="card mt-4 p-5" role="alert">
