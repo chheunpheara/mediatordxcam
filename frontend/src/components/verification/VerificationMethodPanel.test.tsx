@@ -350,6 +350,7 @@ describe('the verify action (§11, §19)', () => {
         return ok(makeVerifyResult())
       }
       if (url.includes('verification-methods')) return ok({ methods: VERIFICATION_METHODS })
+      if (url.includes('/api/v1/records')) return ok({ records: [], total: 0 })
       return ok(makeProcessingResult())
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -411,6 +412,14 @@ describe('the verify action (§11, §19)', () => {
             )
           : Promise.resolve(new Response('{}', { status: 500 }))
       }
+      if (url.includes('/api/v1/records')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ records: [], total: 0 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }
       return Promise.resolve(
         new Response(JSON.stringify(makeProcessingResult()), {
           status: 200,
@@ -466,6 +475,7 @@ describe('posting the response to core systems (D19)', () => {
       if (url.includes('/api/v1/integrations/post')) return ok(post.payload, post.status ?? 200)
       if (url.includes('verification-methods')) return ok({ methods: VERIFICATION_METHODS })
       if (url.includes('/api/v1/kyc/verify')) return ok(makeVerifyResult())
+      if (url.includes('/api/v1/records')) return ok({ records: [], total: 0 })
       return ok(makeProcessingResult())
     })
     vi.stubGlobal('fetch', fetchMock)

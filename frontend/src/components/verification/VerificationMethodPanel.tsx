@@ -1,9 +1,9 @@
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
-import type { VerifyResponse } from '../../lib/api'
 import { FieldCheckList } from './FieldCheckList'
 import { PostToCoreAction } from './PostToCoreAction'
 import { sectionsOf } from './sectionRows'
+import { runStatusSentence } from './statusDisplay'
 
 /**
  * The six official methods, as a dropdown (§9, §10).
@@ -125,7 +125,7 @@ export function VerificationMethodPanel() {
             role="status"
             aria-label="Verification result"
           >
-            <p className="text-ink text-sm font-semibold">{statusSentence(result.status)}</p>
+            <p className="text-ink text-sm font-semibold">{runStatusSentence(result.status)}</p>
             <p className="text-ink-muted mt-1 text-xs">
               {result.identity.matchedCount} of {result.identity.fields.length} details matched.
             </p>
@@ -139,17 +139,6 @@ export function VerificationMethodPanel() {
       ) : null}
     </section>
   )
-}
-
-function statusSentence(status: VerifyResponse['status']): string {
-  switch (status) {
-    case 'success':
-      return 'Verification successful.'
-    case 'partial':
-      return 'Verification partially successful.'
-    case 'failed':
-      return 'Verification failed.'
-  }
 }
 
 /** What this method asks for, in the user's words (§10). */

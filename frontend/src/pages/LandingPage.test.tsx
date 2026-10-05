@@ -226,7 +226,9 @@ describe('workspace without a document', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(/no document selected/i)
+    // Not by role: the records list below the workspace adds its own
+    // status-living loading line to the page (D23).
+    expect(screen.getByText(/no document selected/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /go to upload/i })).toHaveAttribute('href', '/')
   })
 })

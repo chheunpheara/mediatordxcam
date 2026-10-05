@@ -8,7 +8,7 @@ import { FACE_MESSAGES } from '@/features/id-card-processing/faceMessages'
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
 import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
-import { makeProcessingResult, stubProcessingFetch, urlOf } from '@/test/fixtures'
+import { bodyOf, makeProcessingResult, makeUploadedRecord, makeVerifyResult, stubProcessingFetch, urlOf, VERIFICATION_METHODS } from '@/test/fixtures'
 import { saveStoredDocument } from '@/lib/documentStore'
 import { setSessionSlice } from '@/lib/session'
 import type { FaceExtraction, ProcessIdCardResponse } from '@/lib/api'
@@ -184,7 +184,10 @@ describe('column 1, beneath the document — the ID card face (§12, §13)', () 
 
     expect(await screen.findByText(/opencv face detection/i)).toBeInTheDocument()
     expect(screen.getByText(/not been compared against any government record/i)).toBeInTheDocument()
-    expect(screen.queryByText(/verified/i)).not.toBeInTheDocument()
+    // Scoped to the face card: the page's Status filter (D23) honestly offers
+    // a "Verified" option, which is a control, not a claim about this face.
+    const faceCard = screen.getByRole('region', { name: /id card face/i })
+    expect(within(faceCard).queryByText(/verified/i)).not.toBeInTheDocument()
   })
 })
 
@@ -307,7 +310,10 @@ describe('column 2 — the editable KYC form (§14)', () => {
     })
 
     expect(await screen.findByText(/been checked against a government record/i)).toBeInTheDocument()
-    expect(screen.queryByText(/^verified$/i)).not.toBeInTheDocument()
+    // Scoped to the form: the records list's Status filter (D23) offers a
+    // "Verified" option — a control for filtering rows, not a claim here.
+    const form = screen.getByRole('region', { name: /identity information/i })
+    expect(within(form).queryByText(/^verified$/i)).not.toBeInTheDocument()
   })
 })
 
@@ -321,15 +327,18 @@ describe('workspace behaviour', () => {
       'ID card face',
       'Identity information',
       'Verification method',
+      'Uploaded records',
     ])
   })
 
-  it('does not call the API when there is no document to process', () => {
+  it('does not process anything when there is no document in session', () => {
     const fetchMock = stubProcessingFetch()
     renderAt('/id-card')
 
-    expect(screen.getByRole('status')).toHaveTextContent(/no document selected/i)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByText(/no document selected/i)).toBeInTheDocument()
+    // The workspace still loads its method list and the records list (D23) —
+    // what must not happen is a processing call with no file to process.
+    expect(processCalls(fetchMock)).toHaveLength(0)
   })
 
   it('never renders raw JSON, whatever the payload shape', async () => {
@@ -466,5 +475,92 @@ describe('export (D17)', () => {
     // The stub's result: nine values, nine statuses, method and overall status.
     expect(within(dialog).getAllByRole('checkbox')).toHaveLength(20)
     expect(within(dialog).getAllByRole('checkbox').every((box) => (box as HTMLInputElement).checked)).toBe(true)
+  })
+})
+
+describe('uploaded records (D23)', () => {
+  /** The workspace endpoints plus one pending row on the records list. */
+  function stubRecordsWorkflow(record = makeUploadedRecord()) {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = urlOf(input)
+      const ok = (body: unknown) =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      if (url.includes('/api/v1/records/mappings')) return ok({ mapping: null })
+      if (url.includes('/verification') && init?.method === 'POST') {
+        const { verification } = bodyOf<{ verification: Record<string, unknown> }>([input, init])
+        return ok({
+          ...record,
+          status: 'verified',
+          verification: { ...verification, verifiedAt: 1759710000 },
+          verifiedAt: 1759710000,
+        })
+      }
+      if (url.includes('/api/v1/records')) return ok({ records: [record], total: 1 })
+      if (url.includes('verification-methods')) return ok({ methods: VERIFICATION_METHODS })
+      if (url.includes('/api/v1/kyc/verify')) return ok(makeVerifyResult())
+      return ok(makeProcessingResult())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('offers Upload beside Export and opens its dialog', async () => {
+    stubRecordsWorkflow()
+    renderAt('/id-card')
+
+    const upload = await screen.findByRole('button', { name: 'Upload' })
+    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
+
+    fireEvent.click(upload)
+
+    expect(await screen.findByRole('dialog', { name: 'Upload records' })).toBeInTheDocument()
+  })
+
+  it('Start fills the form from a row, with no document attached', async () => {
+    stubRecordsWorkflow()
+    renderAt('/id-card')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }))
+
+    // The workspace appears around the record even though nothing was uploaded.
+    expect(await screen.findByText(/Verifying an uploaded record/)).toBeInTheDocument()
+    const form = await screen.findByRole('region', { name: /identity information/i })
+    expect(within(form).getByText('Imported from the uploaded file.')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^National ID/)).toHaveValue('123456789')
+    // Column 1 explains the absent document instead of hiding the workspace.
+    expect(screen.getByText(/no document uploaded/i)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /verification method/i })).toBeInTheDocument()
+  })
+
+  it('verifies the started row and stores the run against it', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const fetchMock = stubRecordsWorkflow()
+    renderAt('/id-card')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    await screen.findByText(/Verifying an uploaded record/)
+
+    const panel = await screen.findByRole('region', { name: /verification method/i })
+    const verify = within(panel).getByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(verify).toBeEnabled())
+    await userEvent.click(verify)
+
+    // The row's Status cell flips without a reload (D23).
+    await waitFor(() => {
+      const rows = screen.getAllByRole('row')
+      const active = rows.find((row) => row.getAttribute('aria-current') === 'true')
+      expect(active).toBeDefined()
+      expect(active).toHaveTextContent('Verified')
+    })
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => urlOf(call[0]).includes('/records/rec_2f1c9a4b/verification'),
+      ),
+    ).toBe(true)
   })
 })

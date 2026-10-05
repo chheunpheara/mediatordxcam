@@ -25,9 +25,18 @@ export interface IdentityFormProps {
   readonly ocr: IdentityResponse
   /** True while the user has changed at least one field. */
   readonly hasDraft: boolean
+  /**
+   * Where the pre-filled values came from (D23).
+   *
+   * `document` (the default) is the OCR read of an uploaded card; `upload` is
+   * a row from a CSV/Excel upload. The label says which, because "read from
+   * the card" would be untrue for a spreadsheet row — and nothing on this
+   * form may ever imply a source it did not have (§13).
+   */
+  readonly source?: 'document' | 'upload'
 }
 
-export function IdentityForm({ ocr, hasDraft }: IdentityFormProps) {
+export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFormProps) {
   const { draft, setField, clearDraft } = useIdCardProcessing()
   const formId = useId()
 
@@ -47,16 +56,18 @@ export function IdentityForm({ ocr, hasDraft }: IdentityFormProps) {
             onClick={clearDraft}
             type="button"
           >
-            Reset to OCR
+            {source === 'upload' ? 'Reset changes' : 'Reset to OCR'}
           </button>
         ) : null}
       </div>
 
       <p className="text-ink-subtle mt-1 text-xs" role="status">
-        {ocrStatusLabel(ocr)}
+        {source === 'upload' ? 'Imported from the uploaded file.' : ocrStatusLabel(ocr)}
       </p>
       <p className="text-ink-subtle mt-2 text-xs leading-relaxed">
-        Every field is editable so you can correct anything read incorrectly.
+        {source === 'upload'
+          ? 'These values came from the uploaded file. Edit anything that needs fixing.'
+          : 'Every field is editable so you can correct anything read incorrectly.'}
       </p>
 
       <form className="mt-4 grid gap-3" onSubmit={(e) => e.preventDefault()}>
@@ -102,7 +113,7 @@ export function IdentityForm({ ocr, hasDraft }: IdentityFormProps) {
               )}
               {empty && field.required ? (
                 <p className="text-negative mt-1 text-xs">Please enter this information.</p>
-              ) : wasMissing ? (
+              ) : wasMissing && source === 'document' ? (
                 <p className="text-ink-subtle mt-1 text-xs">
                   Not read from the card — please check and enter it.
                 </p>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { ApiError, IDENTITY_FIELDS, fetchVerificationMethods, verify } from '../../lib/api'
 import type {
@@ -42,9 +42,18 @@ export interface SessionInputs {
 export function VerificationProvider({
   children,
   inputs,
+  onResult,
 }: {
   children: React.ReactNode
   inputs: SessionInputs
+  /**
+   * Called with each successful run (D23).
+   *
+   * The workspace uses it to store the outcome against the uploaded record
+   * being verified — `VerifyResponse` carries no run id, so the caller that
+   * knows which record is active has to hand the result over here.
+   */
+  readonly onResult?: (outcome: VerifyResponse) => void
 }) {
   const [methods, setMethods] = useState<readonly VerificationMethod[]>([])
   const [loading, setLoading] = useState(true)
@@ -52,6 +61,14 @@ export function VerificationProvider({
   const [verifying, setVerifying] = useState(false)
   const [history, setHistory] = useState<readonly VerifyResponse[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // Held in a ref so a fresh inline callback never invalidates `runVerify`
+  // mid-session; the effect below keeps it to the latest one.
+  const onResultRef = useRef(onResult)
+  useEffect(() => {
+    onResultRef.current = onResult
+  }, [onResult])
+
 
   // The latest run drives the identity rows; earlier runs stay in `history`
   // so their section outcomes can keep their place in the list (D16).
@@ -127,6 +144,7 @@ export function VerificationProvider({
         idCardFaceRef,
       })
       setHistory((prev) => [...prev, outcome])
+      onResultRef.current?.(outcome)
     } catch (cause) {
       // The list already on screen stays (D16): a refused retry must not wipe
       // a result the user has already read. Only the server's sentence shows.

@@ -4,6 +4,7 @@ import {
   type FaceCaptureResponse,
   type IdentityFieldOutcome,
   type ProcessIdCardResponse,
+  type UploadedRecord,
   type VerificationMethod,
   type VerifyResponse,
 } from '@/lib/api'
@@ -273,8 +274,9 @@ export function stubKycFetch(
     ? verifyResult
     : [verifyResult]
   let verifyCall = 0
-  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = urlOf(input)
+    const method = init?.method ?? 'GET'
     // Each endpoint gets the payload its real contract carries: handing `/verify`
     // a processing payload used to crash the result card on `result.identity`.
     const body = url.includes('verification-methods')
@@ -283,7 +285,15 @@ export function stubKycFetch(
         ? makeFaceCapture()
         : url.includes('/api/v1/kyc/verify')
           ? verifyAnswers[Math.min(verifyCall++, verifyAnswers.length - 1)]!
-          : result
+          : url.includes('/api/v1/records/mappings')
+            ? { mapping: null }
+            : url.includes('/verification')
+              ? makeUploadedRecord({ status: 'verified', verifiedAt: 1759710000 })
+              : url.includes('/api/v1/records')
+                ? method === 'POST'
+                  ? { records: [] }
+                  : { records: [], total: 0 }
+                : result
     return Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,
@@ -301,4 +311,32 @@ export function bodyOf<T>(call: readonly unknown[]): T {
   const body = (init as RequestInit | undefined)?.body
   if (typeof body !== 'string') throw new Error('call had no JSON body')
   return JSON.parse(body) as T
+}
+
+/**
+ * One row of `GET /api/v1/records` (D23).
+ *
+ * A pending, fully mapped record — the state an upload leaves behind — with a
+ * test overriding `status`/`verification` for the verified case.
+ */
+export function makeUploadedRecord(overrides: Partial<UploadedRecord> = {}): UploadedRecord {
+  return {
+    id: 'rec_2f1c9a4b',
+    status: 'pending',
+    values: {
+      nationalId: '123456789',
+      firstNameKhmer: 'សុខា',
+      lastNameKhmer: 'ចម',
+      firstNameEnglish: 'Sokha',
+      lastNameEnglish: 'Cham',
+      dateOfBirth: '1994-02-11',
+      gender: 'F',
+      issuedDate: '2021-04-12',
+      expiryDate: '2029-04-12',
+    },
+    verification: null,
+    createdAt: 1759700000,
+    verifiedAt: null,
+    ...overrides,
+  }
 }
