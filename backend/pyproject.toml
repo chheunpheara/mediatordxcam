@@ -27,9 +27,17 @@ vision = [
     "pytesseract>=0.3.13,<0.4",
     "Pillow>=10,<13",
 ]
-# Phase 10 — persistence, only if a phase requires it (§4, D7)
-db = ["sqlalchemy>=2.0,<3.0", "psycopg[binary]>=3.2,<4.0", "alembic>=1.14,<2.0"]
+# Identity registry (D13) — the sample records verification compares against.
+# `psycopg` is what a live PostgreSQL needs: the Docker image and a host run
+# against the compose database. No Alembic on purpose — one table created at
+# startup has no migration history worth a framework (see infrastructure/db.py).
+db = ["sqlalchemy>=2.0,<3.0", "psycopg[binary]>=3.2,<4.0"]
 dev = [
+    # Self-references: the suite exercises the whole app, so a dev install must
+    # import like one — face and OCR modules need `vision` (cv2, tesseract),
+    # and the app imports SQLAlchemy unconditionally since the identity
+    # registry (D13) arrived, without which the tests cannot even collect.
+    "camdx-kyc-backend[db,vision]",
     "pyyaml>=6.0,<7.0",
     "pytest>=8.3,<9.0",
     "pytest-asyncio>=0.24,<1.0",

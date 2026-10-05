@@ -26,7 +26,8 @@ phase starts (§38).
 **Scope**
 
 - Git repository, `.gitignore`, `.editorconfig`
-- `docker-compose.yml` (backend, frontend, optional postgres profile)
+- `docker-compose.yml` (backend, frontend, optional postgres profile — later the
+  default stack, D13)
 - `backend/` FastAPI app: factory, `Settings`, structured logging with redaction,
   error taxonomy, DI container
 - `GET /health` and `GET /api/v1/health` — liveness + readiness
@@ -255,3 +256,4 @@ their directories exist: `app/domain/requirements.py`, `app/integrations/camdx/*
 | D10 | Scores live on an opt-in `developerView` only | §24 permits an administrator/developer view but forbids scores in the user UI |
 | D11 | Liveness is a session resource, not a single upload | §18 forbids presenting an upload as liveness |
 | D12 | Local Python is 3.14 but the project pins `>=3.11,<3.14` | `opencv-python` wheels lag new CPython releases; Docker pins 3.12 |
+| D13 | PostgreSQL joins the default compose stack, and verification compares the submitted identity against its sample records when `DATABASE_URL` is set (unset → fixture verification, the test default) | Supersedes D6/D7's opt-in: §4 allows persistence where application data is actually required, and the registry is the stand-in for CamDigiKey's record lookup that §26's partial results need. §29 is still honoured — no biometric data is stored, only the nine §14 text fields |

@@ -111,11 +111,14 @@ class TestVerificationMethods:
         assert by_method["verify_user_info"]["available"] is True
         assert by_method["verify_user_info"]["unavailableReason"] is None
 
-        for pending in (
+        for now_available in (
             "verify_user_info_face",
             "verify_user_info_idcard_face",
-            "verify_user_info_idcard_liveness",
         ):
+            assert by_method[now_available]["available"] is True
+            assert by_method[now_available]["unavailableReason"] is None
+
+        for pending in ("verify_user_info_idcard_liveness",):
             assert by_method[pending]["available"] is False
             assert by_method[pending]["unavailableReason"]
 
@@ -320,7 +323,10 @@ class TestServiceBehaviour:
             current_face_ref=ref,
             liveness_ref=None,
         )
-        assert outcome.status is VerificationStatus.SUCCESS
+        # `b"card"` is not an image, so the local face comparison cannot produce a
+        # positive result — verification must report partial, not success.
+        assert outcome.status is VerificationStatus.PARTIAL
+        assert outcome.face is None
 
         rogue = VerificationOutcome(
             status=VerificationStatus.SUCCESS,

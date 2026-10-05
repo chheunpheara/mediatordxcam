@@ -6,6 +6,7 @@ import { useDocumentSession } from '../features/document-upload/DocumentSessionC
 import { Dropzone } from '../features/document-upload/Dropzone'
 import { ImagePreview } from '../features/document-upload/ImagePreview'
 import { validateDocumentImage } from '../features/document-upload/validation'
+import { useFaceCapture } from '../features/face-capture/FaceCaptureContext'
 import { useIdCardProcessing } from '../features/id-card-processing/ProcessingContext'
 
 /**
@@ -25,6 +26,7 @@ export function LandingPage() {
   const navigate = useNavigate()
   const { document, accept, clear } = useDocumentSession()
   const { state, error: processingError, process, reset } = useIdCardProcessing()
+  const faceCapture = useFaceCapture()
   const [validationError, setValidationError] = useState<string | null>(null)
   const [isValidating, setIsValidating] = useState(false)
 
@@ -60,6 +62,7 @@ export function LandingPage() {
   const handleClear = () => {
     clear()
     reset()
+    faceCapture.reset()
     setValidationError(null)
   }
 

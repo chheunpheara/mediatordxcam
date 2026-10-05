@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
+import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { AppRoutes } from '@/app/AppRoutes'
 import { MAX_FILE_SIZE_BYTES, MESSAGES } from '@/features/document-upload/validation'
@@ -50,7 +51,9 @@ function renderLanding() {
     <MemoryRouter initialEntries={['/']}>
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
-          <AppRoutes />
+          <FaceCaptureProvider>
+            <AppRoutes />
+          </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>
     </MemoryRouter>,
@@ -214,7 +217,9 @@ describe('workspace without a document', () => {
       <MemoryRouter initialEntries={['/id-card']}>
         <DocumentSessionProvider>
           <IdCardProcessingProvider>
-            <AppRoutes />
+            <FaceCaptureProvider>
+              <AppRoutes />
+            </FaceCaptureProvider>
           </IdCardProcessingProvider>
         </DocumentSessionProvider>
       </MemoryRouter>,

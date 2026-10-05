@@ -19,7 +19,20 @@ def test_defaults_are_safe_for_development() -> None:
     assert settings.camdx_mode is CamDXMode.MOCK
     assert settings.log_sensitive_payloads is False
     assert settings.camdx_expose_developer_view is False
-    assert settings.database_url is None, "Postgres must stay unused until required (D7)"
+    # No registry by default: verification runs on bundled fixtures (D13), so a
+    # fresh checkout works with no database running.
+    assert settings.database_url is None
+
+
+def test_an_empty_database_url_selects_fixtures_not_a_broken_dsn() -> None:
+    """`.env.example` ships `DATABASE_URL=`; tests force the same empty value.
+
+    An empty string has to mean "unset" — a DSN of `""` would fail to parse at
+    the first connection and turn "fixtures selected" into a startup error.
+    """
+    settings = Settings(_env_file=None, database_url="  ")
+
+    assert settings.database_url is None
 
 
 def test_environment_overrides_are_read(monkeypatch: pytest.MonkeyPatch) -> None:

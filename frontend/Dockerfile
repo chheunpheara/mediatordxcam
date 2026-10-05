@@ -1,15 +1,14 @@
 # syntax=docker/dockerfile:1
 #
-# Optional standalone frontend image.
-#
-# The production image built by backend/Dockerfile already serves the built SPA
-# from the API container, which keeps everything single-origin. This file exists
-# for a split deployment where the frontend is served independently — the Vite
-# dev server already covers that case in development.
+# The browser-facing image of the default stack: builds the SPA and serves it
+# with nginx, proxying /api, /health and /docs to the backend container so the
+# product is single-origin from the browser's point of view (§30).
 #
 # Build context is the FRONTEND directory:
 #
-#     docker build -f frontend/Dockerfile -t camdx-kyc-frontend .
+#     docker build -t camdx-kyc-frontend .
+#
+# docker-compose.yml already does this and publishes it on :3000.
 
 FROM node:22-slim AS build
 

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import artifacts, health, id_card, verification
+from app.api.v1.endpoints import artifacts, face_capture, health, id_card, verification
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(id_card.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(verification.router)
+api_router.include_router(face_capture.router)

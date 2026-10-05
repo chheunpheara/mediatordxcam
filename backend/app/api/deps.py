@@ -20,6 +20,7 @@ from app.integrations.camdx.ocr import OcrProvider
 from app.services.artifacts import TempArtifactStore
 from app.services.documents import DocumentProcessor
 from app.services.face import FaceService
+from app.services.identity_registry import IdentityRegistry
 from app.services.kyc import KycService
 from app.services.local_ocr import LocalTesseractOcrProvider
 
@@ -57,7 +58,11 @@ def ocr_provider_provider(settings: SettingsDep) -> OcrProvider:
     condition to paper over with a fallback to mock.
     """
     if settings.ocr_provider == "tesseract":
-        return LocalTesseractOcrProvider(languages=settings.ocr_languages)
+        return LocalTesseractOcrProvider(
+            languages=settings.ocr_languages,
+            ollama_base_url=settings.ollama_base_url,
+            ollama_model=settings.ollama_model,
+        )
     if settings.camdx_mode.value == "mock":
         return MockOcrProvider()
     raise NotImplementedError(
@@ -89,14 +94,34 @@ def document_processor_provider(
 DocumentProcessorDep = Annotated[DocumentProcessor, Depends(document_processor_provider)]
 
 
-def kyc_service_provider(store: ArtifactStoreDep, settings: SettingsDep) -> KycService:
+def identity_registry_provider(settings: SettingsDep) -> IdentityRegistry | None:
+    """The stored identity records to verify against, or `None` for fixtures (D13).
+
+    `DATABASE_URL` unset — the default, and forced for every test — means the
+    fixture provider answers instead. An unset DSN selects a mode; a *set* one
+    must work, which startup enforces by connecting before serving
+    (`main.lifespan`), so a broken DSN never degrades into fixtures (§21).
+    """
+    if not settings.database_url:
+        return None
+    return IdentityRegistry(settings.database_url)
+
+
+IdentityRegistryDep = Annotated[IdentityRegistry | None, Depends(identity_registry_provider)]
+
+
+def kyc_service_provider(
+    store: ArtifactStoreDep,
+    settings: SettingsDep,
+    registry: IdentityRegistryDep,
+) -> KycService:
     """Build the application-level KYC service (§3).
 
     Holds no state of its own: it composes the artefact store with the adapter
     registry and re-derives requirements on every call, so a mode change takes
     effect without a stale cached service.
     """
-    return KycService(store, camdx_mode=settings.camdx_mode.value)
+    return KycService(store, camdx_mode=settings.camdx_mode.value, registry=registry)
 
 
 KycServiceDep = Annotated[KycService, Depends(kyc_service_provider)]

@@ -5,4 +5,9 @@ import { afterEach } from 'vitest'
 
 afterEach(() => {
   cleanup()
+  try {
+    window.sessionStorage.clear()
+  } catch {
+    // ignore
+  }
 })

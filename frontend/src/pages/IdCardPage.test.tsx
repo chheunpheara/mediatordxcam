@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -6,6 +6,7 @@ import { AppRoutes } from '@/app/AppRoutes'
 import { IDENTITY_FORM_FIELDS } from '@/components/verification/identityFields'
 import { FACE_MESSAGES } from '@/features/id-card-processing/faceMessages'
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
+import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { makeProcessingResult, stubProcessingFetch, urlOf } from '@/test/fixtures'
 import type { FaceExtraction, ProcessIdCardResponse } from '@/lib/api'
@@ -35,7 +36,9 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
-          <AppRoutes />
+          <FaceCaptureProvider>
+            <AppRoutes />
+          </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>
     </MemoryRouter>,
@@ -189,8 +192,9 @@ describe('column 3 — the editable KYC form (§14)', () => {
 
     const form = await screen.findByRole('region', { name: /identity information/i })
     await waitFor(() =>
-      expect(within(form).getAllByRole('textbox')).toHaveLength(IDENTITY_FORM_FIELDS.length),
+      expect(within(form).getAllByText(/Please enter|Not read|required/i).length).toBeGreaterThan(0),
     )
+    expect(form.querySelectorAll('input')).toHaveLength(IDENTITY_FORM_FIELDS.length)
 
     const labels = within(form)
       .getAllByText(/^(National ID|First Name|Last Name|Gender|Date of Birth|Issued Date|Expired Date)/)
@@ -239,12 +243,11 @@ describe('column 3 — the editable KYC form (§14)', () => {
   })
 
   it('accepts a correction and keeps it', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event')
     await renderWorkspaceWithResult()
 
     const dob = await screen.findByLabelText(/^Date of Birth/)
 
-    await userEvent.type(dob, '1994-02-11')
+    fireEvent.change(dob, { target: { value: '1994-02-11' } })
 
     expect(dob).toHaveValue('1994-02-11')
     expect(screen.queryByText('Please enter this information.')).not.toBeInTheDocument()
@@ -293,12 +296,13 @@ describe('column 3 — the editable KYC form (§14)', () => {
   })
 
   it('never claims the entered values were verified (§13)', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event')
     await renderWorkspaceWithResult()
 
     // Fill the last gap so the form reaches its complete state, where the
     // temptation to overclaim is highest.
-    await userEvent.type(await screen.findByLabelText(/^Date of Birth/), '1994-02-11')
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
 
     expect(await screen.findByText(/been checked against a government record/i)).toBeInTheDocument()
     expect(screen.queryByText(/^verified$/i)).not.toBeInTheDocument()

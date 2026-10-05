@@ -84,7 +84,7 @@ export function IdentityForm({ ocr, hasDraft }: IdentityFormProps) {
                 onChange={(event) => setField(field.name, event.target.value)}
                 placeholder={field.hint}
                 required={field.required}
-                type="text"
+                type={field.kind === 'date' ? 'date' : 'text'}
                 value={values[field.name]}
               />
               {empty && field.required ? (

@@ -10,6 +10,8 @@ import { VerificationProvider } from '../features/verification/VerificationProvi
 import { useDocumentSession } from '../features/document-upload/DocumentSessionContext'
 import { resolveIdentity } from '../features/id-card-processing/IdentityDraftContext'
 import { useIdCardProcessing } from '../features/id-card-processing/ProcessingContext'
+import { useFaceCapture } from '../features/face-capture/FaceCaptureContext'
+import { clearSession } from '../lib/session'
 
 /**
  * Verification workspace (§8) — three columns.
@@ -34,8 +36,16 @@ import { useIdCardProcessing } from '../features/id-card-processing/ProcessingCo
  * (§9 requires all six to be visible).
  */
 export function IdCardPage() {
-  const { document } = useDocumentSession()
-  const { state, result, error, process, draft } = useIdCardProcessing()
+  const { document, clear: clearDocument } = useDocumentSession()
+  const { state, result, error, process, draft, reset } = useIdCardProcessing()
+  const faceCapture = useFaceCapture()
+
+  const handleBackToUpload = () => {
+    clearSession()
+    clearDocument()
+    reset()
+    faceCapture.reset()
+  }
 
   const needsProcessing = state === 'idle' && document !== null
 
@@ -64,7 +74,12 @@ export function IdCardPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl p-4 sm:p-6">
-      <h1 className="text-xl font-semibold">Verification workspace</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">Verification workspace</h1>
+        <Link className="btn-secondary py-1.5" onClick={handleBackToUpload} to={routes.landing}>
+          ← Back to upload
+        </Link>
+      </div>
 
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
         <div className="flex flex-col gap-4">
@@ -79,8 +94,9 @@ export function IdCardPage() {
             inputs={{
               identity: result === null ? null : resolveIdentity(result.ocr.fields, draft),
               documentRef: result?.documentRef ?? null,
-              currentFaceRef: null,
+              currentFaceRef: faceCapture.faceRef,
               livenessRef: null,
+              idCardFaceRef: result?.face?.faceRef ?? null,
             }}
           >
             <VerificationMethodPanel />

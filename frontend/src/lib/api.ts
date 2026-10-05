@@ -182,6 +182,36 @@ export async function processIdCard(file: File | Blob): Promise<ProcessIdCardRes
   return (await response.json()) as ProcessIdCardResponse
 }
 
+export interface FaceCaptureResponse {
+  status: FaceStatus
+  detectedCount: number
+  box: FaceBox | null
+  faceRef: string
+  quality: number | null
+}
+
+/** `POST /api/v1/kyc/face-capture`. */
+export async function captureCurrentFace(file: File | Blob): Promise<FaceCaptureResponse> {
+  const body = new FormData()
+  body.append('face', file)
+
+  let response: Response
+  try {
+    response = await fetch(apiUrl('/api/v1/kyc/face-capture'), {
+      method: 'POST',
+      body,
+    })
+  } catch {
+    throw new ApiError('NETWORK_ERROR', NETWORK_ERROR_MESSAGE, 0)
+  }
+
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+
+  return (await response.json()) as FaceCaptureResponse
+}
+
 /**
  * URL for a stored artefact (§14, §29).
  *
@@ -263,6 +293,7 @@ export interface VerifyRequest {
   readonly idCardRef?: string | null
   readonly currentFaceRef?: string | null
   readonly livenessRef?: string | null
+  readonly idCardFaceRef?: string | null
 }
 
 /** The six methods with their requirements (§19). */

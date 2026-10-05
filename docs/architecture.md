@@ -91,9 +91,11 @@ without mocks.
 | `app/domain/identity.py` | 3 | `KhmerIdentity`, `PassportIdentity` value objects |
 | `app/domain/state_machine.py` | 5 | Explicit legal transition table |
 | `app/domain/results.py` | 5 | Normalized `KycResult` (§23) domain model |
+| `app/domain/verification.py` | 5 | §26 field comparison + §25–§27 status rules (pure, no I/O) |
 | `app/services/document_service.py` | 3 | ID-card pipeline: store → OCR → face → result |
 | `app/services/face_service.py` | 3 | OpenCV detect / crop / quality gate (§12) |
 | `app/services/kyc_service.py` | 5 | Validates requirements, dispatches provider, normalizes |
+| `app/services/identity_registry.py` | 5 | Registry lookup + `DatabaseVerifyProvider` (D13) |
 | `app/infrastructure/storage.py` | 3 | TTL temp artifact store, opaque handles (§29) |
 | `app/infrastructure/imaging.py` | 3 | Decode, validate, normalise, thumbnail |
 | `app/integrations/camdx/provider.py` | 5 | `CamDXProvider` port + factory (§21) |
@@ -103,7 +105,7 @@ without mocks.
 | `app/integrations/camdx/normalizer.py` | 5 | Raw response → normalized result (§23) |
 | `app/integrations/camdx/services/*.py` | 5–8 | One module per official API (§20) |
 | `app/integrations/camdx/mock/*` | 3–7 | `MockCamDXProvider`, `MockLivenessProvider` (§18) |
-| `app/infrastructure/db.py` | later | SQLAlchemy — only if persistence is required |
+| `app/infrastructure/db.py` | 5 | Identity registry: sample records, idempotent seed, lookup (D13) |
 
 ### 3.1 The six official API modules (§20)
 

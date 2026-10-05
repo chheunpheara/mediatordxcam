@@ -23,13 +23,18 @@ REPO_ROOT = BACKEND_ROOT.parent
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 
-#: Variables that exist in `.env.example` but are deliberately not runtime
-#: container inputs. Each needs a stated reason, so the exclusion is a decision
-#: rather than an oversight.
+#: Variables that exist in `.env.example` but are deliberately not inputs to the
+#: `app` container's `Settings`. Each needs a stated reason, so the exclusion is
+#: a decision rather than an oversight.
 NOT_CONTAINER_ENV = {
     # Build-time Vite input, baked into the bundle by the frontend Docker stage.
     # It never reaches a running container.
     "VITE_API_BASE_URL",
+    # PostgreSQL's own bootstrapping variables. The `postgres` service consumes
+    # them; the app only ever sees the assembled DATABASE_URL (D13).
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
 }
 
 
@@ -140,35 +145,100 @@ def test_healthcheck_probes_ipv4_loopback() -> None:
     assert "localhost" not in probe
 
 
-def test_postgres_is_opt_in_and_the_app_is_not() -> None:
-    """`docker compose up` must start the app alone (§4, D6).
+def test_postgres_starts_with_the_default_stack() -> None:
+    """`docker compose up` starts the whole product, database included (D13).
 
-    A service with no `profiles` key runs by default; `postgres` must be behind a
-    profile so the default stack stays minimal.
+    Verification compares against stored sample records, so PostgreSQL is a
+    dependency of the default stack rather than a profile someone must remember
+    to enable. A `profiles` key on any of the three would split the stack into
+    a configuration where verification silently falls back to fixtures.
     """
     services = _load_compose()["services"]
 
-    assert "db" in services["postgres"]["profiles"]
-    # Absent `profiles` means "always start" — which is what the app must do.
+    # Absent `profiles` means "always start".
+    assert "profiles" not in services["postgres"]
     assert "profiles" not in services["app"]
+    assert "profiles" not in services["frontend"]
 
 
-def test_there_is_exactly_one_frontend_and_it_is_the_app() -> None:
-    """No second service may claim to be the frontend.
+def test_app_waits_for_postgres_and_uses_the_in_network_dsn() -> None:
+    """The registry connection must be race-free and container-local (D13).
 
-    A separate frontend container serving the same `dist` the app already serves
-    is redundant, and worse, it advertises a second port that nothing listens on
-    under a plain `docker compose up` — which reads as a broken build. The SPA is
-    served by `app`; Vite on 5173 is the host-side dev loop, not a container.
+    `service_healthy` stops the app from racing PostgreSQL's first-boot
+    initialisation, and the DSN must address the `postgres` service on the
+    compose network — the host's `DATABASE_URL` points at localhost, which
+    inside the app container is the app container itself.
+    """
+    app = _load_compose()["services"]["app"]
+
+    assert app["depends_on"]["postgres"]["condition"] == "service_healthy"
+    dsn = str(app["environment"]["DATABASE_URL"])
+    assert dsn.startswith("postgresql+psycopg://")
+    assert "@postgres:5432/" in dsn
+    assert "localhost" not in dsn
+
+
+def test_backend_image_installs_the_registry_driver() -> None:
+    """The app imports SQLAlchemy unconditionally, so the image must ship it (D13)."""
+    backend_dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
+
+    assert '".[vision,db]"' in backend_dockerfile
+
+
+def test_the_stack_is_frontend_plus_backend() -> None:
+    """Exactly three services: `app` (API), `frontend` (SPA) and `postgres` (D13).
+
+    The trio is the architecture, not an implementation detail: `frontend` is the
+    only container the browser addresses, `app` is the only one that holds
+    configuration, and `postgres` is the registry `app` verifies against. A
+    fourth service appearing here means one of those boundaries moved without
+    the contract noticing.
     """
     services = _load_compose()["services"]
 
-    assert set(services) == {"app", "postgres"}
+    assert set(services) == {"app", "frontend", "postgres"}
 
 
-def test_the_app_serves_the_spa() -> None:
-    """The app image must include the built SPA, so one port serves the product."""
-    dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
+def test_frontend_and_backend_publish_separate_ports() -> None:
+    """The two services must be reachable on their own host ports.
 
-    assert "--from=frontend" in dockerfile
-    assert "./static" in dockerfile
+    This is the whole point of the split: :3000 for the SPA, :8000 for the API.
+    Publishing the same port twice would make one of the services unreachable
+    with an error that only appears at `docker compose up` time.
+    """
+    services = _load_compose()["services"]
+
+    assert "3000:80" in services["frontend"]["ports"]
+    assert "8000:8000" in services["app"]["ports"]
+
+
+def test_the_frontend_holds_no_configuration() -> None:
+    """The browser-facing container must never receive credentials (§30).
+
+    nginx serves static files and proxies; it needs no CamDX credential, no
+    logging flag, no storage path. Granting it an `environment:` block would put
+    secrets in a container that has no reason to read them, and the next
+    variable added there would be easy to mistake for backend configuration.
+    """
+    frontend = _load_compose()["services"]["frontend"]
+    environment = frontend.get("environment") or {}
+
+    assert not environment, "frontend must not be configured; all settings belong to app"
+    assert not frontend.get("volumes"), "frontend must not mount the biometric volume"
+
+
+def test_the_app_serves_no_spa() -> None:
+    """The API image must be API-only; the SPA lives in the frontend image.
+
+    Both directions matter. A `dist` inside the app image would resurrect a
+    second, divergent copy of the frontend behind :8000 — two origins serving
+    different bundles. Conversely the frontend image must still build and serve
+    the SPA, or :3000 would answer with a 404 for the product itself.
+    """
+    backend_dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
+    frontend_dockerfile = (BACKEND_ROOT.parent / "frontend" / "Dockerfile").read_text()
+
+    assert "--from=frontend" not in backend_dockerfile
+    assert "./static" not in backend_dockerfile
+    assert "npm run build" in frontend_dockerfile
+    assert "/app/dist" in frontend_dockerfile

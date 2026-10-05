@@ -31,9 +31,6 @@ router = APIRouter(tags=["verification"])
 #: Why a method cannot run yet, keyed by the missing input. Plain language for the
 #: method card (§10); never a phase number or an internal note.
 _UNAVAILABLE_REASON: dict[RequirementFlag, str] = {
-    RequirementFlag.CURRENT_FACE: (
-        "This method needs a current photo of your face, which this build does not capture yet."
-    ),
     RequirementFlag.LIVENESS: (
         "This method needs a liveness check, which this build does not run yet."
     ),
@@ -79,6 +76,7 @@ async def verify(request: VerifyRequest, service: KycServiceDep) -> VerifyRespon
         id_card_ref=request.idCardRef,
         current_face_ref=request.currentFaceRef,
         liveness_ref=request.livenessRef,
+        id_card_face_ref=request.idCardFaceRef,
     )
     return _to_verify_response(outcome)
 
@@ -106,8 +104,6 @@ def _reason_for(flags: frozenset[RequirementFlag], *, is_ocr: bool) -> str | Non
         return "This is a document read, not a verification. It runs when you process a document."
     if RequirementFlag.LIVENESS in flags:
         return _UNAVAILABLE_REASON[RequirementFlag.LIVENESS]
-    if RequirementFlag.CURRENT_FACE in flags:
-        return _UNAVAILABLE_REASON[RequirementFlag.CURRENT_FACE]
     return None
 
 

@@ -8,7 +8,7 @@ Three levels, per §34.
 
 ```text
 backend/tests/
-├── conftest.py                 forces CAMDX_MODE=mock, temp storage isolation
+├── conftest.py                 forces CAMDX_MODE=mock, DATABASE_URL='' (fixtures), temp storage isolation
 ├── unit/                       pure domain — no I/O, no network
 │   ├── test_config.py
 │   ├── test_errors.py
@@ -29,7 +29,8 @@ tests/
 ## 2. Rules
 
 1. **No test contacts the real CamDigiKey service.** `conftest.py` forces
-   `CAMDX_MODE=mock` and asserts it.
+   `CAMDX_MODE=mock` and asserts it. It also forces `DATABASE_URL=''` so
+   verification runs on bundled fixtures — no test needs a database (D13).
 2. **Domain unit tests import no I/O module.** No `httpx`, no `cv2`, no FastAPI.
    A test that needs any of them belongs in `integration/`.
 3. **No real documents in Git.** Fixtures are generated synthetically.
@@ -139,7 +140,7 @@ npx playwright test
 | `backend/tests/integration` | health, compose env contract, upload-rules contract, ID-card endpoint, verification endpoints, artefact sweeper |
 | `frontend` | Vitest; validation, dropzone, session persistence, landing page, API client, workspace columns (document, face, editable form), verification method panel |
 | `make check` | ruff, ruff format, mypy, pytest, eslint, tsc, vitest all green |
-| Docker | `docker compose build app` healthy; `/`, `/health`, `/api/v1/health` → `200`; processing and artefact endpoints exercised over HTTP |
+| Docker | `docker compose up --build` healthy on both services; app (:8000) and frontend (:3000) report healthy; `/`, `/health`, `/api/v1/health` → `200` through the nginx proxy and direct; processing and artefact endpoints exercised over HTTP |
 
 `314 passed` backend, `99 passed` frontend.
 

@@ -3,7 +3,9 @@
 All application endpoints live under `/api/v1`. These are **our** APIs — not
 CamDX's. CamDigiKey is reached only server-side, through `CamDXProvider`.
 
-Base URL in development: `http://localhost:8000`.
+Base URL in development: `http://localhost:8000`. The browser never addresses it
+directly in the Docker stack — nginx on `:3000` forwards these same paths — but
+every path below is valid on either origin.
 
 ---
 

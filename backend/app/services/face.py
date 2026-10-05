@@ -160,6 +160,24 @@ class FaceService:
             detected_count=1,
         )
 
+    def face_match(self, *, stored_face_handle: str | None, current_photo: bytes) -> bool | None:
+        """Local face comparison of the card face against a fresh photo.
+
+        True only when a face is detected in the current photo and its crop is a
+        close match to the stored card-face crop. False when a face is detected but
+        does not match, or none was found at all. None is reserved for the case
+        where we do not have a card-face reference to compare against (nothing has
+        been verified — distinct from a failed check).
+        """
+        if not stored_face_handle:
+            return None
+        current = self.detect(current_photo)
+        if current.status is not FaceExtractionStatus.DETECTED or not current.face_artefact_handle:
+            return False
+        card_bytes = self._store.read(stored_face_handle)
+        current_bytes = self._store.read(current.face_artefact_handle)
+        return _same_photo_crop(card_bytes, current_bytes)
+
     def _decode(self, image_bytes: bytes) -> Any:
         """Decode bytes to a BGR array, or None when they are not an image."""
         cv2 = import_cv2()
@@ -240,3 +258,18 @@ def import_cv2() -> Any:
     except ImportError:
         return None
     return cv2
+
+
+def _same_photo_crop(a: bytes, b: bytes) -> bool:
+    cv2 = import_cv2()
+    if cv2 is None:
+        return False
+    import numpy as np
+
+    im1 = cv2.imdecode(np.frombuffer(a, np.uint8), cv2.IMREAD_GRAYSCALE)
+    im2 = cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if im1 is None or im2 is None:
+        return False
+    g1 = cv2.equalizeHist(cv2.resize(im1, (128, 128)))
+    g2 = cv2.equalizeHist(cv2.resize(im2, (128, 128)))
+    return float(cv2.absdiff(g1, g2).mean()) < 18.0

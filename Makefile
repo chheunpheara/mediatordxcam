@@ -9,6 +9,10 @@ FRONTEND := frontend
 VENV := $(BACKEND)/.venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
+# A supported interpreter (3.11–3.13, D12), not whatever `python3` resolves to:
+# where the default has already moved past the supported range, `python3 -m venv`
+# produces an environment pip then refuses to install into.
+PYTHON := $(shell command -v python3.13 || command -v python3.12 || command -v python3.11)
 
 .DEFAULT_GOAL := help
 .PHONY: help setup backend-install frontend-install check \
@@ -28,7 +32,8 @@ frontend-install: ## Install frontend dependencies
 	cd $(FRONTEND) && npm install
 
 $(VENV)/.installed: $(BACKEND)/pyproject.toml
-	python3 -m venv $(VENV)
+	@test -n "$(PYTHON)" || { echo "No Python 3.11-3.13 found; see docs/development.md §1"; exit 1; }
+	$(PYTHON) -m venv $(VENV)
 	$(PIP) install --upgrade pip
 	$(PIP) install -e "$(BACKEND)[dev]"
 	@touch $@
@@ -69,22 +74,23 @@ frontend-run: ## Start the Vite dev server on :5173
 	cd $(FRONTEND) && npm run dev
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
-docker-build: ## Build the production image
-	docker compose build app
+docker-build: ## Build both images (frontend + backend)
+	docker compose build
 
 docker-up: ## Start the stack and print where things are
 	@docker compose up --build -d
-	@printf '\n  Application   http://localhost:8000\n'
-	@printf '  Health        http://localhost:8000/health\n'
-	@printf '  API docs      http://localhost:8000/docs\n'
-	@printf '\n  The frontend is served by the same container on :8000.\n'
+	@printf '\n  Application   http://localhost:3000   (frontend, nginx)\n'
+	@printf '  Health        http://localhost:3000/health   (proxied to the API)\n'
+	@printf '  API           http://localhost:8000   (backend, direct)\n'
+	@printf '  API docs      http://localhost:8000/docs   (also on :3000/docs)\n'
+	@printf '\n  The browser only addresses :3000; nginx proxies /api to :8000.\n'
 	@printf '  For hot-reload frontend work run: make frontend-run  (Vite, :5173)\n\n'
 
 docker-down: ## Stop the stack and delete volumes, including biometric temp files
-	docker compose --profile db down -v --remove-orphans
+	docker compose down -v --remove-orphans
 
 docker-logs: ## Tail application logs
-	docker compose logs -f app
+	docker compose logs -f app frontend
 
 # ─── Housekeeping ─────────────────────────────────────────────────────────────
 clean: ## Remove build output and caches (never .env or temp artefacts silently)

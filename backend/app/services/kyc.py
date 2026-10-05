@@ -19,10 +19,17 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.core.errors import AppError, ErrorCode, RequirementsNotMetError
-from app.domain.enums import RequirementFlag, VerificationMethod
+from app.domain.enums import (
+    FieldCheckStatus,
+    RequirementFlag,
+    VerificationMethod,
+)
 from app.domain.requirements import missing_requirements, requirements_for
+from app.domain.verification import derive_verification_status
 from app.integrations.camdx.services import build_verify_provider
 from app.integrations.camdx.verify import VerificationOutcome, VerifyProvider
+from app.services.face import FaceService
+from app.services.identity_registry import DatabaseVerifyProvider, IdentityRegistry
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.domain.requirements import MethodRequirements
@@ -34,9 +41,17 @@ logger = logging.getLogger("camdx.kyc")
 class KycService:
     """Validates requirements and dispatches to a CamDigiKey adapter."""
 
-    def __init__(self, store: TempArtifactStore, *, camdx_mode: str = "mock") -> None:
+    def __init__(
+        self,
+        store: TempArtifactStore,
+        *,
+        camdx_mode: str = "mock",
+        registry: IdentityRegistry | None = None,
+    ) -> None:
         self._store = store
         self._camdx_mode = camdx_mode
+        self._registry = registry
+        self._face_service = FaceService(store)
 
     # -- Methods (§19) ---------------------------------------------------
 
@@ -58,6 +73,7 @@ class KycService:
         id_card_ref: str | None,
         current_face_ref: str | None,
         liveness_ref: str | None,
+        id_card_face_ref: str | None = None,
     ) -> VerificationOutcome:
         """Run one verification method, or explain why it cannot run yet."""
         self._refuse_ocr_method(method)
@@ -72,15 +88,85 @@ class KycService:
         if missing:
             raise RequirementsNotMetError(missing=[flag.value for flag in missing])
 
+        required = requirements_for(method).requires
         provider = self._provider(method)
         outcome = await provider.verify(
             identity=identity or {},
-            id_card=self._read(id_card_ref),
-            current_face=self._read(current_face_ref),
-            liveness=self._read(liveness_ref),
+            id_card=self._read(id_card_ref) if RequirementFlag.ID_CARD in required else None,
+            current_face=self._read(current_face_ref)
+            if RequirementFlag.CURRENT_FACE in required
+            else None,
+            liveness=self._read(liveness_ref) if RequirementFlag.LIVENESS in required else None,
         )
         self._assert_outcome_matches_method(method, outcome)
-        return outcome
+        return self._verify_sections(
+            method,
+            outcome,
+            required,
+            id_card_ref=id_card_ref,
+            current_face_ref=current_face_ref,
+            id_card_face_ref=id_card_face_ref,
+        )
+
+    def _verify_sections(
+        self,
+        method: VerificationMethod,
+        outcome: VerificationOutcome,
+        required: frozenset[RequirementFlag],
+        *,
+        id_card_ref: str | None,
+        current_face_ref: str | None,
+        id_card_face_ref: str | None,
+    ) -> VerificationOutcome:
+        """Local compare of the currently-captured face against the ID card face.
+
+        For methods requiring a current face, replace the adapter's face claim with
+        an actual local comparison (OpenCV): the ID card's extracted face versus the
+        face in the freshly-taken/uploaded photo. The ID-card check and liveness
+        keep the adapter outcomes (no live CamDX call in this prototype).
+        """
+        face_verified = outcome.face
+        if RequirementFlag.CURRENT_FACE in required:
+            current_bytes = self._read(current_face_ref)
+            id_face_handle = id_card_face_ref
+            if id_face_handle is None:
+                id_card_bytes = self._read(id_card_ref)
+                if id_card_bytes is not None:
+                    id_face_handle = self._face_service.detect(id_card_bytes).face_artefact_handle
+            face_verified = self._face_service.face_match(
+                stored_face_handle=id_face_handle,
+                current_photo=current_bytes or b"",
+            )
+
+        new_face = face_verified if RequirementFlag.CURRENT_FACE in required else None
+        new_id_card = outcome.id_card if RequirementFlag.ID_CARD in required else None
+        new_liveness = outcome.liveness if RequirementFlag.LIVENESS in required else None
+
+        sections: list[bool | None] = []
+        if RequirementFlag.CURRENT_FACE in required:
+            sections.append(new_face)
+        if RequirementFlag.ID_CARD in required:
+            sections.append(new_id_card)
+        if RequirementFlag.LIVENESS in required:
+            sections.append(new_liveness)
+
+        # The §25-§27 status rule lives in the domain so the fixture provider,
+        # the registry and this re-computation cannot drift apart. Identity with
+        # *some* fields mismatched is `partial` (§26), not `failed`: a report
+        # that can say which fields matched must not be flattened to a refusal.
+        field_statuses = {
+            name: FieldCheckStatus(field.status) for name, field in outcome.identity.items()
+        }
+        status = derive_verification_status(field_statuses, sections=sections)
+
+        return VerificationOutcome(
+            status=status,
+            method=method,
+            identity=outcome.identity,
+            face=new_face,
+            id_card=new_id_card,
+            liveness=new_liveness,
+        )
 
     def missing_requirements(
         self,
@@ -107,12 +193,17 @@ class KycService:
             raise AppError(ErrorCode.INVALID_REQUEST)
 
     def _provider(self, method: VerificationMethod) -> VerifyProvider:
-        if self._camdx_mode == "mock":
-            return build_verify_provider(method)
-        raise NotImplementedError(
-            "real-mode verification is not implemented yet; see "
-            "docs/camdx-integration.md for the open questions that block it."
-        )
+        if self._camdx_mode != "mock":
+            raise NotImplementedError(
+                "real-mode verification is not implemented yet; see "
+                "docs/camdx-integration.md for the open questions that block it."
+            )
+        # Precedence (D13): real CamDX (above, once wired) > registry > fixtures.
+        # The registry check comes second on purpose — with `CAMDX_MODE=real`
+        # nothing may quietly answer in CamDigiKey's place (§21).
+        if self._registry is not None:
+            return DatabaseVerifyProvider(method, self._registry)
+        return build_verify_provider(method)
 
     def _read(self, handle: str | None) -> bytes | None:
         """Resolve an opaque artefact handle to bytes.

@@ -1,25 +1,40 @@
 # CamDX KYC — local development stack.
 #
-#   docker compose up --build              # app (frontend + API, single origin)
-#   docker compose --profile db up -d      # also start PostgreSQL
-#   docker compose --profile tools up --build   # optional admin tooling
+#   docker compose up --build              # frontend (:3000) + API (:8000) + PostgreSQL
+#   docker compose down -v                 # stop; -v also wipes the data volumes
 #
-# PostgreSQL is opt-in on purpose: §4 allows it "only where persistent
-# application data is actually required", and Phase 1 persists nothing
-# (implementation-plan.md D6, D7).
+# Two containers, two ports, one origin for the browser:
+#
+#   browser ──► frontend (:3000, nginx) ── serves the SPA
+#                    │  /api, /health, /docs proxied
+#                    ▼
+#               app (:8000, FastAPI) ── API only, no static files
+#                    │
+#                    ▼
+#               postgres (:5432) ── sample identity registry (D13)
+#
+# The browser only ever addresses :3000; nginx keeps API traffic on the same
+# origin, so no CORS configuration is needed for the product itself (§30).
+#
+# PostgreSQL is part of the default stack (D13): verification compares the
+# submitted identity against stored sample records, which makes the database a
+# dependency of the product rather than an optional profile. The app waits for
+# it to become healthy and gets an in-network DSN below — the `DATABASE_URL` in
+# `.env` only affects running the backend on the host, never this container.
 #
 # Secrets are never baked into an image. CAMDX_* come from the host environment or
-# from a local `.env`, which is git-ignored (§22).
+# from a local `.env`, which is git-ignored (§22). Only the `app` service receives
+# them — the frontend container holds no credentials at all.
 
 name: camdx-kyc
 
 services:
   app:
     build:
-      # Context is the repo root so the frontend stage can build the SPA and the
-      # backend can serve it — one origin, no CORS in production (§30).
-      context: .
-      dockerfile: backend/Dockerfile
+      # API-only image. The SPA is built and served by the `frontend` service, so
+      # nothing in this container is served from a static directory (§29).
+      context: ./backend
+      dockerfile: Dockerfile
     image: camdx-kyc-backend:local
     ports:
       - "8000:8000"
@@ -52,6 +67,9 @@ services:
       CAMDX_EXPOSE_DEVELOPER_VIEW: ${CAMDX_EXPOSE_DEVELOPER_VIEW:-false}
       OCR_PROVIDER: ${OCR_PROVIDER:-tesseract}
       OCR_LANGUAGES: ${OCR_LANGUAGES:-eng+khm}
+      # Local NLP for field extraction. host.docker.internal reaches the host's Ollama.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
 
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8000}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
@@ -65,8 +83,17 @@ services:
       TEMP_ARTIFACT_TTL_SECONDS: ${TEMP_ARTIFACT_TTL_SECONDS:-900}
       TEMP_SWEEP_INTERVAL_SECONDS: ${TEMP_SWEEP_INTERVAL_SECONDS:-60}
 
-      # Declared for the optional `db` profile. Unused by Phase 1 (D7).
-      DATABASE_URL: ${DATABASE_URL:-}
+      # The in-network DSN, assembled from the same POSTGRES_* the `postgres`
+      # service receives, so credentials cannot drift between the two. It is a
+      # fixed value rather than ${DATABASE_URL:-…} on purpose: the host's
+      # DATABASE_URL points at localhost, which inside this container is the
+      # container itself — forwarding it would break the only value that works.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-camdx}:${POSTGRES_PASSWORD:-camdx_local_only}@postgres:5432/${POSTGRES_DB:-camdx_kyc}
+    depends_on:
+      postgres:
+        # Verification queries the registry during the first request; starting
+        # the app before Postgres accepts connections would fail startup (D13).
+        condition: service_healthy
     volumes:
       # Named volume for biometric temp storage: no bytes in an image layer, and
       # `docker compose down -v` wipes them (§29).
@@ -81,23 +108,34 @@ services:
       retries: 3
       start_period: 10s
 
-  # NOTE: there is deliberately no separate `frontend` service.
-  #
-  # An earlier revision had one — nginx serving the same `dist` this image already
-  # serves — behind a `dev` profile. It was redundant (two origins, identical
-  # bytes) and actively misleading: nothing listened on 5173 under a plain
-  # `docker compose up`, so hitting the conventional frontend port looked like a
-  # broken build.
-  #
-  # One image, one origin, one port. For frontend hot-reload development run
-  # `make frontend-run` on the host: Vite serves on 5173 with HMR and proxies
-  # /api to the app container. A split deployment recipe lives in
-  # docs/development.md §8.
+  frontend:
+    # The browser-facing container: builds the SPA and serves it, proxying API
+    # traffic back to `app` so the product stays single-origin from the browser's
+    # point of view (§30).
+    #
+    # It receives no `environment:` block on purpose. Credentials are backend
+    # configuration; a container whose only job is serving static files must not
+    # hold any of them, and `tests/integration/test_compose_env_contract.py`
+    # asserts that stays true.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: camdx-kyc-frontend:local
+    ports:
+      - "3000:80"
+    depends_on:
+      # nginx resolves `upstream backend` at startup, so the API container must
+      # exist first — and healthy, or nginx would happily proxy to a process that
+      # has not finished booting.
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    # Healthcheck comes from frontend/Dockerfile (nginx /healthz).
 
   postgres:
-    # Opt-in: `docker compose --profile db up -d`. Unused by Phase 1 (D7).
+    # The sample identity registry (D13). Started with the default stack —
+    # `docker compose up` brings it up alongside app and frontend.
     image: postgres:17-alpine
-    profiles: ["db"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-camdx}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-camdx_local_only}

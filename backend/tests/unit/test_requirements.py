@@ -105,7 +105,7 @@ def test_api_4_can_never_be_satisfied_here() -> None:
     assert not missing(VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS)
 
 
-def test_only_api_1_is_runnable_today() -> None:
+def test_currently_runnable_methods() -> None:
     """The phase state, asserted so it is revisited when a phase lands."""
     runnable = {
         m
@@ -113,7 +113,11 @@ def test_only_api_1_is_runnable_today() -> None:
         if requirements_for(m).is_satisfiable and not requirements_for(m).is_ocr
     }
 
-    assert runnable == {VerificationMethod.VERIFY_USER_INFO}
+    assert runnable == {
+        VerificationMethod.VERIFY_USER_INFO,
+        VerificationMethod.VERIFY_USER_INFO_FACE,
+        VerificationMethod.VERIFY_USER_INFO_IDCARD_FACE,
+    }
 
 
 def test_a_passport_is_never_counted_as_supplied() -> None:

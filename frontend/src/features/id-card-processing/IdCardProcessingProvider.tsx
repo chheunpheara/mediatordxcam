@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { IdentityFieldName } from '../../lib/api'
 
@@ -8,6 +8,7 @@ import type { ProcessIdCardResponse } from '../../lib/api'
 import type { IdentityDraft } from './IdentityDraftContext'
 import { IdCardProcessingContext } from './ProcessingContext'
 import type { IdCardProcessingValue, ProcessingState } from './ProcessingContext'
+import { clearSessionSlice, readSession, setSessionSlice } from '../../lib/session'
 
 /**
  * Owns the `POST /api/v1/kyc/id-card/process` call for the session.
@@ -23,10 +24,36 @@ import type { IdCardProcessingValue, ProcessingState } from './ProcessingContext
  * (§26, §28).
  */
 export function IdCardProcessingProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<ProcessingState>('idle')
-  const [result, setResult] = useState<ProcessIdCardResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState<IdentityDraft>({})
+  const [state, setState] = useState<ProcessingState>(() => {
+    const stored = readSession()?.processing
+    if (stored?.state === 'processing') return 'failed'
+    return stored?.state ?? 'idle'
+  })
+  const [result, setResult] = useState<ProcessIdCardResponse | null>(() => {
+    const stored = readSession()?.processing
+    return stored?.state === 'ready' ? stored.result : null
+  })
+  const [error, setError] = useState<string | null>(() => {
+    const stored = readSession()?.processing
+    return stored?.error ?? (stored?.state === 'processing' ? 'Processing was interrupted. Please try again.' : null)
+  })
+  const [draft, setDraft] = useState<IdentityDraft>(() => readSession()?.processing?.draft ?? {})
+
+  // Restoring a stored `processing` snapshot is not meaningful (the request is
+  // not narrowed any faster from disk); turn it into an actionable failure.
+  // The effect below then persists that state consistently.
+
+  useEffect(() => {
+    if (state === 'processing') {
+      clearSessionSlice('processing')
+      return
+    }
+    if (state === 'idle' && result === null && error === null && Object.keys(draft).length === 0) {
+      clearSessionSlice('processing')
+      return
+    }
+    setSessionSlice('processing', { state, result, draft, error })
+  }, [state, result, draft, error])
 
   const process = useCallback(async (file: File | Blob) => {
     setState('processing')

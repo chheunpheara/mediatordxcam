@@ -101,28 +101,40 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The whole product — frontend **and** API — is then at **http://localhost:8000**.
+The product is then at **http://localhost:3000**; the API answers on
+**http://localhost:8000**. PostgreSQL starts with the stack: it seeds three
+obviously-fake sample identities and verification compares submissions against
+them (D13 — see [docs/development.md](docs/development.md) §2 for the IDs).
 
 ```bash
-docker compose --profile db up -d     # optional PostgreSQL (unused through Phase 3)
-docker compose down -v                # stop; -v also deletes biometric temp files
+docker compose down -v                # stop; -v also deletes biometric temp files and the seeded database
 ```
 
-### One container, one port
+### Two containers, two ports
 
-`app` builds the SPA and serves it **and** the API, so the whole product is at
-**http://localhost:8000**. There is no second frontend container and nothing
-listens on 5173 under Docker.
+| Container | Port | Role |
+|---|---|---|
+| `frontend` | **:3000** | nginx — serves the SPA, proxies `/api`, `/health` and `/docs` to the backend |
+| `app` | **:8000** | FastAPI — the API only, no static files |
+
+The browser only ever addresses **:3000**, so the product is single-origin from
+its point of view: nginx forwards API traffic to `app` on the compose network and
+no CORS configuration is needed (§30). CamDigiKey is still reached by the backend
+process alone.
 
 | URL | |
 |---|---|
-| http://localhost:8000 | the application (frontend + API) |
-| http://localhost:8000/health | liveness |
-| http://localhost:8000/api/v1/health | readiness |
-| http://localhost:8000/docs | API docs |
+| http://localhost:3000 | the application |
+| http://localhost:3000/health | liveness (proxied) |
+| http://localhost:3000/api/v1/health | readiness (proxied) |
+| http://localhost:3000/docs | API docs (proxied) |
+| http://localhost:8000/api/v1/health | readiness, direct on the API |
+| http://localhost:8000/docs | API docs, direct on the API |
 
-For frontend work with hot reload, run Vite on the host alongside the container —
-see below. That is the only case where 5173 is used.
+The backend is deliberately API-only: it ships no copy of the browser bundle, so
+only one origin can ever serve the UI. For frontend work with hot reload, run Vite
+on the host alongside the containers — see below. That is the only case where
+5173 is used.
 
 ### Local development
 
@@ -137,7 +149,7 @@ Two ways to run the frontend, and they are not interchangeable:
 
 | How | URL | Use when |
 |-----|-----|----------|
-| `make docker-up` | :8000 | Testing the real build, or anything containerised |
+| `make docker-up` | :3000 | Testing the real build, or anything containerised |
 | `make frontend-run` | :5173 | Writing frontend code — Vite HMR, proxies `/api` to :8000 |
 
 Requires Python 3.11–3.13 and Node 20.19+. Python is capped below 3.14 for
@@ -161,7 +173,7 @@ All settings live in `backend/app/core/config.py`. `.env.example` lists them all
 | `MAX_UPLOAD_BYTES` | `10485760` | Hard upload cap |
 | `TEMP_ARTIFACT_TTL_SECONDS` | `900` | Biometric artefact lifetime |
 | `TEMP_STORAGE_DIR` | `var/tmp` | Must stay outside any static mount |
-| `DATABASE_URL` | — | Declared, **unused** through Phase 3 |
+| `DATABASE_URL` | — | Identity-registry DSN; empty = fixture verification, no database needed |
 
 `.env` is git-ignored. No credential is committed, and none is ever baked into an
 image — compose reads them from the host environment.
@@ -174,6 +186,12 @@ The default. `MockCamDXProvider` answers all six APIs from fixtures with no
 network and no credentials. Outcomes are deterministic and steered by documented
 triggers (for example a national ID of `000000000` produces an identity
 mismatch), so tests never flake.
+
+Identity comparison itself has a second rung: with `DATABASE_URL` set, submitted
+fields are compared against the PostgreSQL sample records instead of the bundled
+fixtures (provider precedence documented in
+[docs/implementation-plan.md](docs/implementation-plan.md), D13). Leave the
+variable empty and fixtures answer — which is what the test suite runs on.
 
 `MockLivenessProvider` is a **separate class** so the real liveness
 implementation replaces only that piece.

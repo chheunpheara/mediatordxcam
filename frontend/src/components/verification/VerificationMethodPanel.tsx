@@ -1,4 +1,6 @@
 import { useVerification } from '../../features/verification/VerificationContext'
+import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
+import type { VerifyResponse } from '../../lib/api'
 
 /**
  * The six official methods, as a dropdown (§9, §10).
@@ -14,8 +16,10 @@ import { useVerification } from '../../features/verification/VerificationContext
  * fewer than it does.
  */
 export function VerificationMethodPanel() {
-  const { methods, selected, select, blockingReason, canVerify, verifying, verify, error } =
+  const { methods, selected, select, blockingReason, canVerify, verifying, verify, error, result } =
     useVerification()
+
+  const chosen = methods.find((m) => m.method === selected) ?? null
 
   return (
     <section className="card p-5" aria-label="Verification method">
@@ -74,6 +78,8 @@ export function VerificationMethodPanel() {
         </div>
       )}
 
+      {chosen?.requiresCurrentFace ? <FaceCapturePanel /> : null}
+
       <button
         className="btn-primary mt-4 w-full"
         disabled={!canVerify || verifying}
@@ -97,8 +103,55 @@ export function VerificationMethodPanel() {
           {error}
         </p>
       ) : null}
+
+      {result ? (
+        <div
+          className="border-border bg-surface-sunken mt-4 rounded-lg border p-3"
+          role="status"
+          aria-label="Verification result"
+        >
+          <p className="text-ink text-sm font-semibold">{statusSentence(result.status)}</p>
+          <p className="text-ink-muted mt-1 text-xs">
+            {result.identity.matchedCount} of {result.identity.fields.length} details matched.
+          </p>
+          {result.identity.incorrectFields.length > 0 ? (
+            <p className="text-negative mt-1 text-xs">
+              Fields to review: {result.identity.incorrectFields.join(', ')}.
+            </p>
+          ) : null}
+          {result.face.required ? (
+            <p className="text-ink-muted mt-1 text-xs">
+              Face verification: {result.face.verified === null ? 'no result' : result.face.verified ? 'passed' : 'failed'}.
+            </p>
+          ) : null}
+          {result.idCard.required ? (
+            <p className="text-ink-muted mt-1 text-xs">
+              ID card check: {result.idCard.verified === null ? 'no result' : result.idCard.verified ? 'passed' : 'failed'}.
+            </p>
+          ) : null}
+          {result.liveness.required ? (
+            <p className="text-ink-muted mt-1 text-xs">
+              Liveness check: {result.liveness.verified === null ? 'no result' : result.liveness.verified ? 'passed' : 'failed'}.
+            </p>
+          ) : null}
+          <p className="text-ink-subtle mt-2 text-xs">
+            This is an in-app check against the backend sample. It does not contact CamDX yet.
+          </p>
+        </div>
+      ) : null}
     </section>
   )
+}
+
+function statusSentence(status: VerifyResponse['status']): string {
+  switch (status) {
+    case 'success':
+      return 'Verification successful.'
+    case 'partial':
+      return 'Verification partially successful.'
+    case 'failed':
+      return 'Verification failed.'
+  }
 }
 
 /** What this method asks for, in the user's words (§10). */

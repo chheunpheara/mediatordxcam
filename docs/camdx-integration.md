@@ -106,6 +106,13 @@ never by random failure.
 the real CamDX liveness implementation without touching `MockCamDXProvider`
 or the UI (§18).
 
+Identity comparison has one rung below this: with `DATABASE_URL` set (the Docker
+default, D13), submitted fields are compared against the seeded PostgreSQL
+sample records instead of `MockCamDXProvider`'s fixture comparison. The real
+adapter sits above both — `CAMDX_MODE=real` stops provider selection there
+first, so the registry can only answer while the real integration is still
+unwired. Precedence: real → registry → fixtures.
+
 ---
 
 ## 4. Real implementation

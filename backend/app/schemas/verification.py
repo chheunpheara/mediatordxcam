@@ -88,6 +88,10 @@ class VerifyRequest(ApiModel):
     idCardRef: str | None = Field(default=None, description="Opaque handle; required by API 3/4.")
     currentFaceRef: str | None = Field(default=None, description="Required by API 2/3.")
     livenessRef: str | None = Field(default=None, description="Required by API 4.")
+    idCardFaceRef: str | None = Field(
+        default=None,
+        description="Face image extracted from the ID card to compare against the current face.",
+    )
 
 
 class FieldOutcomeResponse(ApiModel):

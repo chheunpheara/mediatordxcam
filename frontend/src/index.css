@@ -89,6 +89,13 @@
   @apply btn border-border-strong bg-surface-raised text-ink hover:bg-surface-sunken;
 }
 
+@utility input {
+  @apply block w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-ink
+    placeholder:text-ink-subtle transition-colors
+    focus-visible:border-brand focus-visible:outline-none
+    disabled:cursor-not-allowed disabled:opacity-50;
+}
+
 /* Screen-reader-only content: visible to assistive tech, invisible on screen. */
 .sr-only-focusable:not(:focus):not(:focus-within) {
   position: absolute;

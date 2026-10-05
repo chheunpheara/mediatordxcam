@@ -97,7 +97,6 @@ METHOD_REQUIREMENTS: dict[VerificationMethod, MethodRequirements] = {
         "Identity + Face",
         RequirementFlag.USER_INFO,
         RequirementFlag.CURRENT_FACE,
-        introduced_in=("current face capture",),
     ),
     VerificationMethod.VERIFY_USER_INFO_IDCARD_FACE: _requirements(
         VerificationMethod.VERIFY_USER_INFO_IDCARD_FACE,
@@ -106,7 +105,6 @@ METHOD_REQUIREMENTS: dict[VerificationMethod, MethodRequirements] = {
         RequirementFlag.USER_INFO,
         RequirementFlag.ID_CARD,
         RequirementFlag.CURRENT_FACE,
-        introduced_in=("current face capture",),
     ),
     VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS: _requirements(
         VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS,
@@ -115,7 +113,7 @@ METHOD_REQUIREMENTS: dict[VerificationMethod, MethodRequirements] = {
         RequirementFlag.USER_INFO,
         RequirementFlag.ID_CARD,
         RequirementFlag.LIVENESS,
-        introduced_in=("current face capture", "liveness"),
+        introduced_in=("liveness",),
     ),
     VerificationMethod.KHMER_ID_CARD_OCR: _requirements(
         VerificationMethod.KHMER_ID_CARD_OCR,

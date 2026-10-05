@@ -1,5 +1,6 @@
 import { IdCardProcessingProvider } from '../features/id-card-processing/IdCardProcessingProvider'
 import { DocumentSessionProvider } from '../features/document-upload/DocumentSessionProvider'
+import { FaceCaptureProvider } from '../features/face-capture/FaceCaptureProvider'
 
 import { AppErrorBoundary } from './AppErrorBoundary'
 import { AppRoutes } from './AppRoutes'
@@ -26,9 +27,11 @@ export function App() {
       </a>
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
-          <div id="main-content">
-            <AppRoutes />
-          </div>
+          <FaceCaptureProvider>
+            <div id="main-content">
+              <AppRoutes />
+            </div>
+          </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>
     </AppErrorBoundary>

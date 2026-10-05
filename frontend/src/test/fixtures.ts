@@ -1,4 +1,10 @@
-import type { ProcessIdCardResponse, VerificationMethod } from '@/lib/api'
+import {
+  IDENTITY_FIELDS,
+  type IdentityFieldOutcome,
+  type ProcessIdCardResponse,
+  type VerificationMethod,
+  type VerifyResponse,
+} from '@/lib/api'
 
 /**
  * The URL of a stubbed `fetch` call.
@@ -54,6 +60,40 @@ export function makeProcessingResult(
       quality: 96.4,
     },
     documentRef: 'art_fedcba9876543210fedcba9876543210',
+    ...overrides,
+  }
+}
+
+/**
+ * A realistic `POST /api/v1/kyc/verify` response (§23).
+ *
+ * Mirrors what the mock provider returns for API 1 once the identity is fully
+ * supplied: every field checked and matched, and no other section required.
+ * A test wanting a partial or failed outcome overrides one key instead of
+ * hand-rolling a payload, so a contract change stays one obvious diff.
+ *
+ * Without a dedicated fixture the stub used to answer `/verify` with a
+ * *processing* payload, and the result card crashed rendering
+ * `result.identity.matchedCount` on `undefined`.
+ */
+export function makeVerifyResult(overrides: Partial<VerifyResponse> = {}): VerifyResponse {
+  const submitted = {
+    ...makeProcessingResult().ocr.fields,
+    dateOfBirth: '1994-02-11',
+  }
+  const fields: readonly IdentityFieldOutcome[] = IDENTITY_FIELDS.map((field) => ({
+    field,
+    status: 'matched' as const,
+    submitted: submitted[field],
+  }))
+
+  return {
+    status: 'success',
+    method: 'verify_user_info',
+    identity: { fields, matchedCount: fields.length, incorrectFields: [] },
+    face: { required: false, verified: null },
+    idCard: { required: false, verified: null },
+    liveness: { required: false, verified: null },
     ...overrides,
   }
 }
@@ -123,9 +163,8 @@ export const VERIFICATION_METHODS: readonly VerificationMethod[] = [
     requiresLiveness: false,
     requiresPassport: false,
     isOcr: false,
-    available: false,
-    unavailableReason:
-      'This method needs a current photo of your face, which this build does not capture yet.',
+    available: true,
+    unavailableReason: null,
   },
   {
     method: 'verify_user_info_idcard_face',
@@ -137,9 +176,8 @@ export const VERIFICATION_METHODS: readonly VerificationMethod[] = [
     requiresLiveness: false,
     requiresPassport: false,
     isOcr: false,
-    available: false,
-    unavailableReason:
-      'This method needs a current photo of your face, which this build does not capture yet.',
+    available: true,
+    unavailableReason: null,
   },
   {
     method: 'verify_user_info_idcard_liveness',
@@ -164,8 +202,8 @@ export const VERIFICATION_METHODS: readonly VerificationMethod[] = [
     requiresLiveness: false,
     requiresPassport: false,
     isOcr: true,
-    available: true,
-    unavailableReason: null,
+    available: false,
+    unavailableReason: 'This is a document read, not a verification. It runs when you process a document.',
   },
   {
     method: 'passport_ocr',
@@ -189,7 +227,13 @@ export function stubKycFetch(
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = urlOf(input)
-    const body = url.includes('verification-methods') ? { methods } : result
+    // Each endpoint gets the payload its real contract carries: handing `/verify`
+    // a processing payload used to crash the result card on `result.identity`.
+    const body = url.includes('verification-methods')
+      ? { methods }
+      : url.includes('/api/v1/kyc/verify')
+        ? makeVerifyResult()
+        : result
     return Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,

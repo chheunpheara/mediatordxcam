@@ -14,16 +14,18 @@ export interface IdentityFormField {
   readonly label: string
   readonly hint?: string
   readonly required?: boolean
+  /** Render as a native date input (picker) when `date`. */
+  readonly kind?: 'date'
 }
 
 export const IDENTITY_FORM_FIELDS: readonly IdentityFormField[] = [
   { name: 'nationalId', label: 'National ID', required: true },
   { name: 'firstNameKhmer', label: 'First Name — Khmer', hint: 'ឈ្មោះដំបូង', required: true },
-  { name: 'lastNameKhmer', label: 'Last Name — Khmer', hint: 'ឈ្មោះគ្រួសារ' },
-  { name: 'firstNameEnglish', label: 'First Name — English' },
-  { name: 'lastNameEnglish', label: 'Last Name — English' },
-  { name: 'gender', label: 'Gender' },
-  { name: 'dateOfBirth', label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true },
-  { name: 'issuedDate', label: 'Issued Date', hint: 'YYYY-MM-DD' },
-  { name: 'expiryDate', label: 'Expired Date', hint: 'YYYY-MM-DD' },
+  { name: 'lastNameKhmer', label: 'Last Name — Khmer', hint: 'ឈ្មោះគ្រួសារ', required: true },
+  { name: 'firstNameEnglish', label: 'First Name — English', required: true },
+  { name: 'lastNameEnglish', label: 'Last Name — English', required: true },
+  { name: 'gender', label: 'Gender', required: true },
+  { name: 'dateOfBirth', label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true, kind: 'date' },
+  { name: 'issuedDate', label: 'Issued Date', hint: 'YYYY-MM-DD', required: true, kind: 'date' },
+  { name: 'expiryDate', label: 'Expired Date', hint: 'YYYY-MM-DD', required: true, kind: 'date' },
 ]

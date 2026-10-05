@@ -87,3 +87,14 @@ class ProcessIdCardResponse(ApiModel):
     face: FaceExtractionResponse
     #: Opaque handle to the stored original, for the document column (§14).
     documentRef: str
+
+
+class FaceCaptureResponse(ApiModel):
+    """Output of `POST /api/v1/kyc/face-capture`."""
+
+    status: str = Field(description=f"One of {[s.value for s in FaceExtractionStatus]}.")
+    detectedCount: int
+    box: FaceBoxResponse | None = None
+    #: Opaque handle for the captured current face artefact.
+    faceRef: str
+    quality: float | None = Field(default=None, description="Crop clarity, not a match score.")

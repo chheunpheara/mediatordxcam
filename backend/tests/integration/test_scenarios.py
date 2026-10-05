@@ -154,7 +154,11 @@ async def test_scenario_a_method_is_offered_before_the_user_chooses(
 
     assert listed.status_code == 200
     runnable = [m["method"] for m in listed.json()["methods"] if m["available"]]
-    assert runnable == ["verify_user_info"]
+    assert runnable == [
+        "verify_user_info",
+        "verify_user_info_face",
+        "verify_user_info_idcard_face",
+    ]
 
 
 # --- Scenario F -------------------------------------------------------------

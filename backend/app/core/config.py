@@ -109,6 +109,13 @@ class Settings(BaseSettings):
         ),
     )
     ocr_languages: str = Field(default="eng+khm", description="Tesseract language codes.")
+    ollama_base_url: str | None = Field(
+        default=None,
+        description="Local Ollama server for NLP field extraction. Never calls CamDX.",
+    )
+    ollama_model: str = Field(
+        default="llama3.1", description="Ollama model for OCR field extraction."
+    )
 
     # -- HTTP / CORS -------------------------------------------------------
     # `NoDecode` disables pydantic-settings' JSON pre-parsing for this field so a
@@ -137,11 +144,16 @@ class Settings(BaseSettings):
         default=60, ge=5, description="Temp artefact sweeper cadence."
     )
 
-    # -- Database (§4, D7) -------------------------------------------------
-    # Declared so the compose profile and docs agree, but deliberately unused
-    # until a phase introduces a genuine persistence requirement.
+    # -- Database (§4, D13) ------------------------------------------------
+    # The sample identity records verification compares against. Unset (or
+    # empty) selects fixture verification — no database, no connection, which
+    # is the default and what every test runs on.
     database_url: str | None = Field(
-        default=None, description="Postgres DSN. Unused in Phase 1 (D7)."
+        default=None,
+        description=(
+            "DSN for the identity registry (D13). Empty/unset = fixture "
+            "verification. Compose injects the in-network value itself."
+        ),
     )
 
     # -- Validators --------------------------------------------------------
@@ -163,6 +175,20 @@ class Settings(BaseSettings):
         value = value.strip().lower()
         if value not in ("mock", "tesseract"):
             raise ValueError("ocr_provider must be 'mock' or 'tesseract'")
+        return value
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _empty_database_url_is_unset(cls, value: object) -> object:
+        """`DATABASE_URL=` means "no registry", not a DSN of "".
+
+        `.env.example` ships it empty, tests force it empty, and an empty
+        string that later failed to parse as a DSN would turn "fixtures
+        selected" into a startup error.
+        """
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
         return value
 
     # -- Derived helpers ---------------------------------------------------

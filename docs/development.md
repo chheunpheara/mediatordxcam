@@ -27,40 +27,45 @@ docker compose up --build
 
 | Service | URL |
 |---------|-----|
-| Application (frontend **and** API) | http://localhost:8000 |
-| Health | http://localhost:8000/health |
-| Readiness | http://localhost:8000/api/v1/health |
-| API docs | http://localhost:8000/docs |
+| Application (SPA) — `frontend` container | http://localhost:3000 |
+| Health through the proxy | http://localhost:3000/health |
+| API docs through the proxy | http://localhost:3000/docs |
+| API — `app` container, direct | http://localhost:8000/api/v1/health |
+| API docs, direct | http://localhost:8000/docs |
 
-There is **one** container and **one** port. `app` builds the SPA and serves it
-alongside the API, so the product is single-origin (§30).
+**Two containers, two ports, one origin for the browser.** `frontend` builds the
+SPA and serves it with nginx on :3000, proxying `/api`, `/health`,
+`/health/ready`, `/docs` and `/openapi.json` to `app` on :8000. The browser only
+addresses :3000, so the product stays single-origin from its point of view and
+needs no CORS configuration (§30). `app` is API-only and ships no static files.
 
-Postgres is **not** started by default (§4, D6):
+**PostgreSQL starts with the stack** (D13): it is the sample identity registry
+verification compares against, so `app` waits for it to become healthy and is
+given its in-network DSN. Three obviously-fake records are seeded on first start
+(§16 — nobody can mistake them for real identities):
 
-```bash
-docker compose --profile db up -d postgres
-```
+| National ID | What it is for |
+|-------------|----------------|
+| `000000000000` | The card the mock OCR reads. OCR leaves the date of birth blank — enter `1992-07-18` for a full success, any other date for a one-field §26 partial |
+| `123456789` | The straightforward success case: submit the stored fields exactly (Sokha Cham, DOB `1994-02-11`) |
+| `111111111` | Take an OCR-processed identity and swap only the national ID here: date of birth, gender and last name mismatch at once → §26 multi-field partial |
+| anything else | Unknown → `failed` |
 
-Stop and clean up, including the temp artefact volume:
+Running the backend on the host instead (`make backend-run`)? Its `DATABASE_URL`
+comes from `.env`; leave it empty and verification runs on bundled fixtures with
+no database at all — which is also exactly what the test suite does.
+
+Stop and clean up, including the temp artefact volume and the seeded database:
 
 ```bash
 docker compose down -v
 ```
 
-**No frontend container.** An earlier revision shipped a `frontend` service
-(nginx serving the same `dist`) behind a `dev` profile. It was removed: nothing
-listened on 5173 under a plain `docker compose up`, so the conventional frontend
-port looked like a broken build even though the SPA was running fine on 8000. If
-you previously started it, remove any leftover container once:
-
-```bash
-docker rm -f camdx-kyc-frontend-1 2>/dev/null || true
-```
-
 **Healthcheck note:** every container probes `127.0.0.1`, never `localhost`.
-`localhost` resolves to `::1` first in the alpine and slim base images, while the
-servers bind IPv4 only, so a `localhost` probe reports a healthy service as
-unhealthy.
+`localhost` resolves to `::1` first in the alpine and slim base images, while
+the servers bind IPv4 only, so a `localhost` probe reports a healthy service as
+unhealthy. The `frontend` service waits for `app` to become healthy before it
+starts, because nginx resolves `upstream backend` once at startup.
 
 ---
 
@@ -113,7 +118,9 @@ make check               # lint + typecheck + tests, both sides
 
 `backend/app/core/config.py` is the single definition; `.env.example` is
 generated to match it. Copy `.env.example` to `.env` — `.env` is git-ignored and
-must never be committed (§22).
+must never be committed (§22). The `POSTGRES_*` variables in `.env.example` are
+the exception: they are consumed by the `postgres` service in compose, not by
+`Settings` (D13).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -131,13 +138,15 @@ must never be committed (§22).
 | `CAMDX_EXPOSE_DEVELOPER_VIEW` | `false` | Adds `developerView` to results (§24, D10) |
 | `OCR_PROVIDER` | `mock` | `mock` fixtures or real capture via local `tesseract` |
 | `OCR_LANGUAGES` | `eng+khm` | Tesseract language codes |
+| `OLLAMA_BASE_URL` | — | Local Ollama server for NLP capture (Docker: `host.docker.internal`) |
+| `OLLAMA_MODEL` | `llama3.1` | Ollama model for field extraction |
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allow-list |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Hard upload cap (§29) |
 | `MIN_IMAGE_WIDTH` / `MIN_IMAGE_HEIGHT` | `640` / `480` | Minimum resolution (must match `frontend/src/features/document-upload/validation.ts`) |
 | `TEMP_STORAGE_DIR` | `var/tmp` | Outside every static path |
 | `TEMP_ARTIFACT_TTL_SECONDS` | `900` | Biometric artefact lifetime |
 | `TEMP_SWEEP_INTERVAL_SECONDS` | `60` | Sweeper cadence |
-| `DATABASE_URL` | — | Postgres DSN; **unused in Phase 1** (D7) |
+| `DATABASE_URL` | — | Identity-registry DSN (D13). Empty = fixture verification, no database needed |
 
 In `CAMDX_MODE=real` the backend refuses to start if the required credentials are
 absent. It never silently falls back to mock (§21).
@@ -194,26 +203,40 @@ requirements, no invented CamDX behaviour, mock and real kept separate.
 
 ---
 
-## 8. Split deployment (optional, not the default)
+## 8. Serving topology
 
-The supported shape is one container serving the SPA and the API — single origin,
-no CORS, no second surface to secure. Do not split it without a reason.
+The default stack is two containers on two ports:
 
-If you must serve the SPA from a separate host, `frontend/Dockerfile` and
-`frontend/nginx.conf` implement it: nginx serves `dist` and proxies `/api` and
-the health probes to the backend, so the browser still only ever addresses one
-origin. Change the `upstream backend` server address for a non-Compose
-deployment.
+```text
+browser ──► frontend :3000 (nginx: SPA + reverse proxy)
+                 │  /api, /health, /health/ready, /docs, /openapi.json
+                 ▼
+              app :8000 (FastAPI, API only — no static files)
+                 │
+                 ▼
+           CamDigiKey (server-side only, CAMDX_* credentials)
+```
 
-Two constraints that config already encodes and that any replacement must keep:
+`frontend/Dockerfile` builds the SPA and `frontend/nginx.conf` serves it while
+proxying the API paths to the `app` service, so the browser still only ever
+addresses one origin. The backend image deliberately ships no `dist`: with the
+SPA reachable from exactly one container, there is no second bundle to drift out
+of sync, and no static directory that a future mount could accidentally point at
+user uploads (§29).
+
+Constraints the nginx config already encodes and any replacement must keep:
 
 - `try_files … /index.html` — without it, refreshing `/id-card` 404s, because
   client-side routing means the browser requests that path directly.
 - `proxy_set_header X-Request-Id $request_id` — without it, error reports cannot
   be traced (§28).
+- `/health` and `/docs` are proxied explicitly — the SPA fallback would otherwise
+  answer them with HTML, which reads as healthy-but-wrong to an orchestrator.
+- No `CAMDX_*` variable is passed to this container. It serves static files; it
+  has no reason to hold a credential (§30).
 
-Neither file is exercised by the default stack or by CI, so treat a split
-deployment as untested until you have verified it end to end.
+For a non-Compose deployment, change the `upstream backend` server address and
+verify deep links, the proxy and both health probes end to end.
 
 ---
 
@@ -252,6 +275,9 @@ curl -s localhost:8000/openapi.json | jq '.paths | keys'
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Backend exits at startup with `ConfigurationError` | `CAMDX_MODE=real` without credentials | Supply credentials, or use `CAMDX_MODE=mock` |
+| Backend exits at startup with `ConfigurationError`, message mentions the registry | `DATABASE_URL` set but unreachable/malformed (D13 fail-fast) | Start Postgres (`docker compose up -d postgres`), or clear `DATABASE_URL` for fixture verification |
+| Verification returns 502 `UPSTREAM_UNAVAILABLE` | Database went away after startup | Check `docker compose ps`; the message is deliberately DSN-free |
+| Every identity field shows mismatch and `failed` | National ID absent from the registry — no record means nothing could match (§27) | Use a seeded ID from §2, or `docker compose down -v` + up to reseed; this is the designed unknown-ID outcome |
 | Frontend 404s on `/api` | Dev proxy not applied | Restart Vite; confirm `vite.config.ts` proxy |
 | `uvicorn` not found | venv not active | `source backend/.venv/bin/activate` |
 | `opencv` import error | Interpreter outside `>=3.11,<3.14`, or missing headless wheel | Use 3.12 and `pip install -e ".[dev]"` |

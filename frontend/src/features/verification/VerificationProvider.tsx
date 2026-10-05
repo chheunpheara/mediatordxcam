@@ -36,6 +36,7 @@ export interface SessionInputs {
   readonly documentRef: string | null
   readonly currentFaceRef: string | null
   readonly livenessRef: string | null
+  readonly idCardFaceRef: string | null
 }
 
 export function VerificationProvider({
@@ -52,7 +53,7 @@ export function VerificationProvider({
   const [result, setResult] = useState<VerifyResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const { identity, documentRef, currentFaceRef, livenessRef } = inputs
+  const { identity, documentRef, currentFaceRef, livenessRef, idCardFaceRef } = inputs
 
   // Mirrors the backend gate: all nine §14 fields, or it is not identity supplied.
   const hasIdentity =
@@ -120,6 +121,7 @@ export function VerificationProvider({
           idCardRef: documentRef,
           currentFaceRef,
           livenessRef,
+          idCardFaceRef,
         }),
       )
     } catch (cause) {
@@ -128,7 +130,7 @@ export function VerificationProvider({
     } finally {
       setVerifying(false)
     }
-  }, [chosen, identity, documentRef, currentFaceRef, livenessRef])
+  }, [chosen, identity, documentRef, currentFaceRef, livenessRef, idCardFaceRef])
 
   const reset = useCallback(() => {
     setResult(null)

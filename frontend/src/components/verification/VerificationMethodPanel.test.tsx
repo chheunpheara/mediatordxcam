@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppRoutes } from '@/app/AppRoutes'
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
+import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import {
   VERIFICATION_METHODS,
@@ -42,7 +43,9 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
-          <AppRoutes />
+          <FaceCaptureProvider>
+            <AppRoutes />
+          </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>
     </MemoryRouter>,
@@ -212,7 +215,9 @@ describe('the verify action (§11, §19)', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     const { fetchMock } = await renderWorkspace()
 
-    await userEvent.type(await screen.findByLabelText(/^Date of Birth/), '1994-02-11')
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
 
     const panel = await methodPanel()
     const button = await within(panel).findByRole('button', { name: 'Verify' })

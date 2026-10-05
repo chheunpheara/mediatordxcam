@@ -27,9 +27,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import AppEnvironment, Settings, get_settings
-from app.core.errors import AppError, ErrorCode, error_envelope, register_exception_handlers
+from app.core.errors import (
+    AppError,
+    ConfigurationError,
+    ErrorCode,
+    error_envelope,
+    register_exception_handlers,
+)
 from app.core.ids import REQUEST_ID_HEADER, new_request_id
 from app.core.logging import configure_logging, register_sensitive_values
+from app.infrastructure.db import init_database
 from app.services.artifacts import TempArtifactStore
 
 #: Every route below this prefix returns data derived from an identity document.
@@ -52,6 +59,10 @@ def _configure_observability(settings: Settings) -> None:
     register_sensitive_values(
         [
             settings.camdx_base_url,
+            # The DSN embeds the database password and is registered *before*
+            # the registry connects, so a driver error echoing it is redacted
+            # in the very log lines that report the failure (§29).
+            settings.database_url,
             settings.camdx_client_id.get_secret_value() if settings.camdx_client_id else None,
             settings.camdx_client_secret.get_secret_value()
             if settings.camdx_client_secret
@@ -77,6 +88,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "startup",
         extra={"environment": str(settings.app_env), "camdx_mode": str(settings.camdx_mode)},
     )
+
+    if settings.database_url:
+        # Fail fast when a DSN is configured but unusable: verification would
+        # otherwise 502 on the first request while the process looks healthy.
+        # Unset DSN (fixtures) skips this entirely — the default test path.
+        try:
+            seeded = await asyncio.to_thread(init_database, settings.database_url)
+        except Exception as exc:
+            logger.exception("identity registry init failed")
+            raise ConfigurationError(
+                message=(
+                    "DATABASE_URL is set but the identity registry could not be "
+                    "reached. Start the database, or unset DATABASE_URL to verify "
+                    "against the bundled fixtures instead."
+                ),
+                code=ErrorCode.CONFIGURATION_ERROR,
+            ) from exc
+        logger.info("identity registry ready", extra={"seeded_records": seeded})
 
     store = TempArtifactStore(
         settings.temp_storage_dir,

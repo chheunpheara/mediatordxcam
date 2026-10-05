@@ -1,11 +1,18 @@
 """Shared test fixtures.
 
-Invariants enforced here rather than repeated per test (§34):
+Invarianten enforced here rather than repeated per test (§34):
 
 * `CAMDX_MODE` is `mock` — no test may reach the real CamDigiKey service.
+* `DATABASE_URL` is empty — no test may reach a database unless it builds its
+  own registry fixture (D13). A repository `.env` can point at a local
+  PostgreSQL, and tests must not depend on it being up.
 * Payload logging is disabled, so a test cannot accidentally emit sensitive data.
 * Temp artefact storage points at a per-test directory, so artefacts never leak
   between tests or reach the real `var/tmp`.
+
+`get_settings` is a process-wide cache, so it is cleared around every test:
+whatever the next test builds must read the environment *that* test set, not
+one left behind by its predecessor.
 """
 
 from __future__ import annotations
@@ -18,7 +25,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import AppEnvironment, Settings
+from app.core.config import AppEnvironment, Settings, get_settings
 from app.main import create_app
 from tests.fixtures.images import card_with_face, card_without_face
 
@@ -30,7 +37,12 @@ def _isolate_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterat
     monkeypatch.setenv("OCR_PROVIDER", "mock")
     monkeypatch.setenv("LOG_SENSITIVE_PAYLOADS", "false")
     monkeypatch.setenv("APP_ENV", AppEnvironment.LOCAL.value)
+    # Empty, not unset: `.env` may set a DSN, and only an explicit empty value
+    # overrides the file (the field validator then maps it back to "no registry").
+    monkeypatch.setenv("DATABASE_URL", "")
+    get_settings.cache_clear()
     yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
