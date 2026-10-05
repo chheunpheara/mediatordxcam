@@ -1,6 +1,7 @@
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
 import type { VerifyResponse } from '../../lib/api'
+import { FieldCheckList } from './FieldCheckList'
 
 /**
  * The six official methods, as a dropdown (§9, §10).
@@ -114,11 +115,7 @@ export function VerificationMethodPanel() {
           <p className="text-ink-muted mt-1 text-xs">
             {result.identity.matchedCount} of {result.identity.fields.length} details matched.
           </p>
-          {result.identity.incorrectFields.length > 0 ? (
-            <p className="text-negative mt-1 text-xs">
-              Fields to review: {result.identity.incorrectFields.join(', ')}.
-            </p>
-          ) : null}
+          <FieldCheckList fields={result.identity.fields} />
           {result.face.required ? (
             <p className="text-ink-muted mt-1 text-xs">
               Face verification: {result.face.verified === null ? 'no result' : result.face.verified ? 'passed' : 'failed'}.

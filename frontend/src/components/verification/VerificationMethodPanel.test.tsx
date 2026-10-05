@@ -240,6 +240,29 @@ describe('the verify action (§11, §19)', () => {
     expect(sent.userInformation.nationalId).toBe('123456789')
   })
 
+  it('renders the result as a per-field status list, icon and word per row (§25, §32)', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await renderWorkspace()
+
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+
+    const panel = await methodPanel()
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Verify' }))
+
+    // The stub answers every field as matched, so all nine rows read "Matched"
+    // with a tick — the response's `identity.fields`, not a client-side recount.
+    const card = await screen.findByRole('status', { name: 'Verification result' })
+    const rows = await within(card).findAllByRole('listitem')
+    expect(rows).toHaveLength(9)
+    expect(rows[0]!).toHaveTextContent('National ID')
+    for (const row of rows) {
+      expect(row).toHaveTextContent('Matched')
+      expect(row.querySelector('svg')).toBeTruthy()
+    }
+  })
+
   it('never shows a raw error when the backend refuses (§28)', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL): Promise<Response> => {
       const url = urlOf(input)
