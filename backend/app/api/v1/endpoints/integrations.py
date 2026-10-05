@@ -9,8 +9,9 @@ and the atomic replace all live in `IntegrationService`.
 Routes:
 
 ```text
-GET /api/v1/integrations/settings   configured targets (never passwords)
-PUT /api/v1/integrations/settings   replace the whole list
+GET  /api/v1/integrations/settings   configured targets (never passwords)
+PUT  /api/v1/integrations/settings   replace the whole list
+POST /api/v1/integrations/post       send a verification response to them all
 ```
 """
 
@@ -23,6 +24,9 @@ from app.infrastructure.integration_store import IntegrationSetting
 from app.schemas.integrations import (
     IntegrationSettingResponse,
     IntegrationSettingsResponse,
+    PostFailureResponse,
+    PostToCoreRequest,
+    PostToCoreResponse,
     SaveIntegrationSettingsRequest,
 )
 
@@ -63,3 +67,23 @@ async def save_settings(
 def _setting_response(setting: IntegrationSetting) -> IntegrationSettingResponse:
     """The wire shape — deliberately without `api_password` (§29)."""
     return IntegrationSettingResponse(id=setting.id, url=setting.url, apiUser=setting.api_user)
+
+
+@router.post("/post", response_model=PostToCoreResponse)
+async def post_to_core(
+    body: PostToCoreRequest,
+    service: IntegrationServiceDep,
+    _user: CorePostUserDep,
+) -> PostToCoreResponse:
+    """Post the current verification response to every configured system.
+
+    The browser hands over the result exactly as the verifier produced it;
+    the service replays it to each target with Basic auth and reports per-url
+    outcomes in safe words (§28). `400` when nothing is configured, so the
+    click never silently "succeeds" without a target.
+    """
+    outcome = await service.post_to_core(body.payload)
+    return PostToCoreResponse(
+        posted=outcome["posted"],
+        failed=[PostFailureResponse(**item) for item in outcome["failed"]],
+    )

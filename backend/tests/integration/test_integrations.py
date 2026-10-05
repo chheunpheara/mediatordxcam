@@ -9,10 +9,19 @@ leaves the stored list alone.
 
 from __future__ import annotations
 
-from httpx import AsyncClient
+import json
+from collections.abc import AsyncIterator, Callable
 
+import httpx
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.api.deps import integration_service_provider
+from app.core.config import Settings, get_settings
 from app.infrastructure.integration_store import IntegrationStore
+from app.main import create_app
 from app.services.auth import DEFAULT_ADMIN_PASSWORD
+from app.services.integrations import IntegrationService
 
 ADMIN = "admin@gmail.com"
 PASSWORD = "Str0ng!Pass"
@@ -188,3 +197,170 @@ class TestSaveRoundTrip:
         assert refused.status_code == 400
         listed = (await auth_client.get("/api/v1/integrations/settings")).json()["settings"]
         assert [item["url"] for item in listed] == [ROW_A["url"]]
+
+
+class _Target:
+    """The fake core system: records what was sent, answers as told.
+
+    Tests steer it through `respond` (and may raise from it) without any real
+    network — the service's injected transport points here.
+    """
+
+    def __init__(self) -> None:
+        self.requests: list[httpx.Request] = []
+        self.respond: Callable[[httpx.Request], httpx.Response] = _accept
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self.respond(request)
+
+
+def _accept(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={"accepted": True})
+
+
+@pytest.fixture
+async def posting_client(
+    auth_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[AsyncClient, _Target]]:
+    """An auth-enforcing client whose outbound posts land on a mock target.
+
+    Mirrors `auth_client`, plus one dependency override: the integration
+    service is built with `httpx.MockTransport`, so "the core system" is a
+    Python callable in this process — same wiring as production, none of the
+    network (testing rule 5).
+    """
+    monkeypatch.setenv("DATABASE_URL", auth_settings.database_url or "")
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    get_settings.cache_clear()
+    app = create_app(auth_settings)
+    target = _Target()
+
+    def override() -> IntegrationService:
+        return IntegrationService(get_settings(), transport=httpx.MockTransport(target.handler))
+
+    app.dependency_overrides[integration_service_provider] = override
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac, target
+    get_settings.cache_clear()
+
+
+async def _save_one_setting(client: AsyncClient, row: dict[str, str]) -> None:
+    response = await client.put("/api/v1/integrations/settings", json={"settings": [row]})
+    assert response.status_code == 200, response.text
+
+
+class TestPostToCore:
+    async def test_a_configured_target_receives_the_payload_with_basic_auth(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+        await _save_one_setting(client, ROW_A)
+
+        payload = {"method": "OCR", "decision": "approved", "subject": "Jane Doe"}
+        response = await client.post("/api/v1/integrations/post", json={"payload": payload})
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"posted": [ROW_A["url"]], "failed": []}
+        assert len(target.requests) == 1
+        sent = target.requests[0]
+        assert str(sent.url) == ROW_A["url"]
+        assert json.loads(sent.content) == payload
+        assert sent.headers["authorization"].startswith("Basic ")
+
+    async def test_each_target_is_reported_separately_in_safe_words(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+        saved = await client.put("/api/v1/integrations/settings", json={"settings": [ROW_A, ROW_B]})
+        assert saved.status_code == 200, saved.text
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "core-a.examplebank.example":
+                return httpx.Response(200, json={"accepted": True})
+            return httpx.Response(500, text="traceback: internal at 10.0.0.7:5432")
+
+        target.respond = respond
+        payload = {"decision": "review"}
+        response = await client.post("/api/v1/integrations/post", json={"payload": payload})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["posted"] == [ROW_A["url"]]
+        assert body["failed"] == [
+            {"url": ROW_B["url"], "reason": "The system did not accept the submission."}
+        ]
+        assert "traceback" not in response.text
+        assert "10.0.0.7" not in response.text
+        assert len(target.requests) == 2
+
+    async def test_refused_credentials_read_as_refused_credentials(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+        await _save_one_setting(client, ROW_A)
+        target.respond = lambda _request: httpx.Response(401, json={"error": "bad key"})
+
+        response = await client.post(
+            "/api/v1/integrations/post", json={"payload": {"decision": "review"}}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["failed"] == [
+            {"url": ROW_A["url"], "reason": "The system refused the API credentials."}
+        ]
+        assert "bad key" not in response.text
+
+    async def test_a_timeout_is_reported_without_driver_text(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+        await _save_one_setting(client, ROW_A)
+
+        def boom(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectTimeout("connect to 10.1.2.3:443 failed")
+
+        target.respond = boom  # type: ignore[assignment]
+        response = await client.post(
+            "/api/v1/integrations/post", json={"payload": {"decision": "review"}}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["failed"] == [
+            {"url": ROW_A["url"], "reason": "The system timed out."}
+        ]
+        assert "10.1.2.3" not in response.text
+
+    async def test_sending_anywhere_without_settings_is_refused(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        response = await client.post(
+            "/api/v1/integrations/post", json={"payload": {"decision": "review"}}
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["message"] == (
+            "There are no core systems configured yet. Add one in Post Settings first."
+        )
+        assert target.requests == []
+
+    async def test_a_loan_officer_cannot_post(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, _target = posting_client
+        await _login_admin(client)
+        await _create_user_with_role(client, "loan@example.com", "Loan Officer")
+
+        response = await client.post(
+            "/api/v1/integrations/post", json={"payload": {"decision": "review"}}
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"

@@ -14,7 +14,10 @@ the account service: a database round-trip must not stall the event loop.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from urllib.parse import urlparse
+
+import httpx
 
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
@@ -29,12 +32,28 @@ from app.infrastructure.integration_store import (
 #: field: one number, no compose/env surface for a value no operator asked for.
 POST_TIMEOUT_SECONDS = 10.0
 
+#: Failure words an end user may read. Safe for §28: no URLs, credentials,
+#: stack text or upstream body ever reaches the screen.
+REASON_TIMEOUT = "The system timed out."
+REASON_UNREACHABLE = "The system could not be reached."
+REASON_CREDENTIALS = "The system refused the API credentials."
+REASON_REJECTED = "The system did not accept the submission."
+NO_SETTINGS_MESSAGE = "There are no core systems configured yet. Add one in Post Settings first."
+
 
 class IntegrationService:
-    """Settings CRUD for core-system posting (D19)."""
+    """Settings CRUD and the outbound post for core-systems (D19)."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._store = IntegrationStore(resolve_integration_database_url(settings.database_url))
+        #: Injected in tests (`httpx.MockTransport`); production sends over
+        #: the real network with the default transport.
+        self._transport = transport
 
     async def list_settings(self) -> list[IntegrationSetting]:
         """Every target including passwords — callers decide what may leave."""
@@ -94,6 +113,46 @@ class IntegrationService:
 
         await asyncio.to_thread(self._store.replace_all, built)
         return built
+
+    async def post_to_core(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send `payload` to every configured system (D19).
+
+        One outbound POST per stored setting, HTTP Basic with the stored
+        credentials. The answer is always a `200` describing each target —
+        `posted` for the systems that took it, `failed` (with one of the safe
+        reasons above) for the rest — so a browser can report partial success
+        honestly. Only "nothing is configured" is an error: without it a
+        silent all-empty result would look like success.
+        """
+        targets = await self.list_settings()
+        if not targets:
+            raise AppError(ErrorCode.INVALID_REQUEST, message=NO_SETTINGS_MESSAGE)
+
+        posted: list[str] = []
+        failed: list[dict[str, str]] = []
+        async with httpx.AsyncClient(
+            transport=self._transport, timeout=POST_TIMEOUT_SECONDS
+        ) as client:
+            for target in targets:
+                try:
+                    response = await client.post(
+                        target.url,
+                        json=payload,
+                        auth=(target.api_user, target.api_password),
+                    )
+                except httpx.TimeoutException:
+                    failed.append({"url": target.url, "reason": REASON_TIMEOUT})
+                except httpx.TransportError:
+                    failed.append({"url": target.url, "reason": REASON_UNREACHABLE})
+                else:
+                    if 200 <= response.status_code < 300:
+                        posted.append(target.url)
+                    elif response.status_code in (401, 403):
+                        failed.append({"url": target.url, "reason": REASON_CREDENTIALS})
+                    else:
+                        failed.append({"url": target.url, "reason": REASON_REJECTED})
+
+        return {"posted": posted, "failed": failed}
 
 
 def _field_error(field: str, message: str) -> AppError:

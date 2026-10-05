@@ -8,6 +8,8 @@ row keeps the stored one.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import Field
 
 from app.schemas.common import ApiModel
@@ -38,3 +40,23 @@ class SaveIntegrationSettingsRequest(ApiModel):
 
 class IntegrationSettingsResponse(ApiModel):
     settings: list[IntegrationSettingResponse]
+
+
+class PostToCoreRequest(ApiModel):
+    """`POST /api/v1/integrations/post` — the verification response to send."""
+
+    payload: dict[str, Any]
+
+
+class PostFailureResponse(ApiModel):
+    """One target that did not accept the post, in safe words only (§28)."""
+
+    url: str
+    reason: str
+
+
+class PostToCoreResponse(ApiModel):
+    """Outcome per target: which systems took it, which did not."""
+
+    posted: list[str]
+    failed: list[PostFailureResponse]
