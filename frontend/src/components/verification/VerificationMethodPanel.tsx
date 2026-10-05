@@ -2,6 +2,7 @@ import { useVerification } from '../../features/verification/VerificationContext
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
 import type { VerifyResponse } from '../../lib/api'
 import { FieldCheckList } from './FieldCheckList'
+import { PostToCoreAction } from './PostToCoreAction'
 import { sectionsOf } from './sectionRows'
 
 /**
@@ -117,20 +118,24 @@ export function VerificationMethodPanel() {
       ) : null}
 
       {result ? (
-        <div
-          className="border-border bg-surface-sunken mt-4 rounded-lg border p-3"
-          role="status"
-          aria-label="Verification result"
-        >
-          <p className="text-ink text-sm font-semibold">{statusSentence(result.status)}</p>
-          <p className="text-ink-muted mt-1 text-xs">
-            {result.identity.matchedCount} of {result.identity.fields.length} details matched.
-          </p>
-          <FieldCheckList fields={result.identity.fields} sections={sectionsOf(history)} />
-          <p className="text-ink-subtle mt-2 text-xs">
-            This is an in-app check against the backend sample. It does not contact CamDX yet.
-          </p>
-        </div>
+        <>
+          <h3 className="text-ink-subtle mt-4 text-sm font-semibold">Verification Response</h3>
+          <div
+            className="border-border bg-surface-sunken mt-2 rounded-lg border p-3"
+            role="status"
+            aria-label="Verification result"
+          >
+            <p className="text-ink text-sm font-semibold">{statusSentence(result.status)}</p>
+            <p className="text-ink-muted mt-1 text-xs">
+              {result.identity.matchedCount} of {result.identity.fields.length} details matched.
+            </p>
+            <FieldCheckList fields={result.identity.fields} sections={sectionsOf(history)} />
+            <p className="text-ink-subtle mt-2 text-xs">
+              This is an in-app check against the backend sample. It does not contact CamDX yet.
+            </p>
+          </div>
+          <PostToCoreAction />
+        </>
       ) : null}
     </section>
   )

@@ -6,7 +6,9 @@ import { AppRoutes } from '@/app/AppRoutes'
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
 import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
+import { writeAuthUser } from '@/lib/auth'
 import {
+  TEST_AUTH_USER,
   VERIFICATION_METHODS,
   bodyOf,
   makeProcessingResult,
@@ -441,3 +443,131 @@ interface VerifyRequestPayload {
   readonly method: string
   readonly userInformation: Record<string, string | null>
 }
+
+describe('posting the response to core systems (D19)', () => {
+  interface PostRoute {
+    readonly payload: unknown
+    readonly status?: number
+  }
+
+  /** The workspace with one route added: the integrations post endpoint. */
+  function stubWorkspaceWithPost(post: PostRoute) {
+    const fetchMock = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = urlOf(input)
+      const ok = (body: unknown, status = 200) =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      if (url.includes('/api/v1/integrations/post')) return ok(post.payload, post.status ?? 200)
+      if (url.includes('verification-methods')) return ok({ methods: VERIFICATION_METHODS })
+      if (url.includes('/api/v1/kyc/verify')) return ok(makeVerifyResult())
+      return ok(makeProcessingResult())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  async function verifyFirst(fetchMock: ReturnType<typeof vi.fn>) {
+    const view = renderAt('/')
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
+    await waitFor(() => expect(input).toBeTruthy())
+    const { default: userEvent } = await import('@testing-library/user-event')
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(() => Promise.resolve({ width: 1280, height: 800, close: vi.fn() })),
+    )
+    await userEvent.upload(input, new File(['x'], 'card.jpg', { type: 'image/jpeg' }))
+    await userEvent.click(await screen.findByRole('button', { name: /continue to verification/i }))
+
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+    const panel = await methodPanel()
+    const verify = await within(panel).findByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(verify).toBeEnabled())
+    await userEvent.click(verify)
+    await screen.findByRole('status', { name: 'Verification result' })
+    return { fetchMock, panel, userEvent }
+  }
+
+  it('titles the result Verification Response, above the card, and posts it', async () => {
+    const fetchMock = stubWorkspaceWithPost({
+      payload: { posted: ['https://core.example/post'], failed: [] },
+    })
+
+    const { panel, userEvent } = await verifyFirst(fetchMock)
+
+    // The heading owns the section the card sits in — card follows it.
+    const heading = within(panel).getByRole('heading', { name: 'Verification Response' })
+    const card = within(panel).getByRole('status', { name: 'Verification result' })
+    expect(heading.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Post to Core Systems' }))
+
+    const notice = await screen.findByRole('alertdialog', { name: 'Posted' })
+    expect(notice).toHaveTextContent('Sent to 1 core system.')
+    expect(notice).toHaveTextContent('https://core.example/post')
+
+    // The current result went as the payload — the card's own outcome.
+    const call = fetchMock.mock.calls.find(([input]) =>
+      urlOf(input).includes('/api/v1/integrations/post'),
+    )
+    expect(call).toBeDefined()
+    expect(bodyOf<{ payload: { status: string; method: string } }>(call!)).toMatchObject({
+      payload: { status: 'success', method: 'verify_user_info' },
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'OK' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('names a system that refused the post with the safe reason', async () => {
+    const fetchMock = stubWorkspaceWithPost({
+      payload: {
+        posted: [],
+        failed: [
+          { url: 'https://other.example/post', reason: 'The system refused the API credentials.' },
+        ],
+      },
+    })
+
+    const { panel, userEvent } = await verifyFirst(fetchMock)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Post to Core Systems' }))
+
+    const notice = await screen.findByRole('alertdialog', { name: 'Posted with problems' })
+    expect(notice).toHaveTextContent('1 did not accept it.')
+    expect(notice).toHaveTextContent('The system refused the API credentials.')
+  })
+
+  it('shows the server sentence when nothing is configured', async () => {
+    const fetchMock = stubWorkspaceWithPost({
+      payload: {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'There are no core systems configured yet. Add one in Post Settings first.',
+          fieldErrors: {},
+          requestId: 'req_5',
+        },
+      },
+      status: 400,
+    })
+
+    const { panel, userEvent } = await verifyFirst(fetchMock)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Post to Core Systems' }))
+
+    const notice = await screen.findByRole('alertdialog', { name: 'Could not post' })
+    expect(notice).toHaveTextContent('There are no core systems configured yet.')
+  })
+
+  it('offers nothing to a profile without the full permission set', async () => {
+    writeAuthUser({ ...TEST_AUTH_USER, permissions: ['verify_user_info'] })
+    const fetchMock = stubWorkspaceWithPost({ payload: { posted: [], failed: [] } })
+
+    const { panel } = await verifyFirst(fetchMock)
+
+    expect(within(panel).queryByRole('button', { name: 'Post to Core Systems' })).not.toBeInTheDocument()
+  })
+})
