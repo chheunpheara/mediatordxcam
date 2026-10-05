@@ -661,3 +661,92 @@ export async function testConnection(
     jsonInit('POST', row),
   )
 }
+
+/* ------------------------------------------------------------------------- *
+ * Uploaded records: bulk CSV/Excel rows and the saved mapping (D23)
+ * ------------------------------------------------------------------------- */
+
+export type UploadedRecordStatus = 'pending' | 'verified'
+
+/** A run's outcome as a record keeps it — the `VerifyResponse` plus its stamp. */
+export interface StoredVerification extends VerifyResponse {
+  readonly verifiedAt: number
+}
+
+/** One row of the uploaded-records list. */
+export interface UploadedRecord {
+  readonly id: string
+  readonly status: UploadedRecordStatus
+  /** All nine §14 fields; a field the mapping never filled is null. */
+  readonly values: IdentityFields
+  readonly verification: StoredVerification | null
+  readonly createdAt: number
+  readonly verifiedAt: number | null
+}
+
+/** The list's controls, sent as query parameters in one call. */
+export interface RecordListQuery {
+  readonly search?: string
+  readonly status?: UploadedRecordStatus
+  readonly limit?: number
+  readonly offset?: number
+}
+
+export interface RecordListResponse {
+  readonly records: readonly UploadedRecord[]
+  readonly total: number
+}
+
+/** One row on its way to `POST /api/v1/records` — only the mapped fields. */
+export type RecordValuesInput = Partial<Record<IdentityFieldName, string>>
+
+/** The saved default mapping: file column name → §14 field name (D23). */
+export type ColumnMapping = Readonly<Record<string, IdentityFieldName>>
+
+/** `GET /api/v1/records` — search, status filter, limit and offset in one call. */
+export async function fetchRecords(query: RecordListQuery = {}): Promise<RecordListResponse> {
+  const params = new URLSearchParams()
+  if (query.search) params.set('search', query.search)
+  if (query.status) params.set('status', query.status)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined) params.set('offset', String(query.offset))
+  const suffix = params.toString()
+  return requestJson<RecordListResponse>(`/api/v1/records${suffix ? `?${suffix}` : ''}`)
+}
+
+/** `POST /api/v1/records` — the reviewed rows (201). */
+export async function createRecords(
+  records: readonly RecordValuesInput[],
+): Promise<readonly UploadedRecord[]> {
+  const body = await requestJson<{ records: readonly UploadedRecord[] }>(
+    '/api/v1/records',
+    jsonInit('POST', { records }),
+  )
+  return body.records
+}
+
+/** `POST /api/v1/records/{id}/verification` — store the outcome, mark verified (D23). */
+export async function saveRecordVerification(
+  recordId: string,
+  verification: VerifyResponse,
+): Promise<UploadedRecord> {
+  return requestJson<UploadedRecord>(
+    `/api/v1/records/${encodeURIComponent(recordId)}/verification`,
+    jsonInit('POST', { verification }),
+  )
+}
+
+/** `GET /api/v1/records/mappings` — the saved mapping, or null when never saved. */
+export async function fetchRecordMapping(): Promise<ColumnMapping | null> {
+  const body = await requestJson<{ mapping: ColumnMapping | null }>('/api/v1/records/mappings')
+  return body.mapping
+}
+
+/** `PUT /api/v1/records/mappings` — replace the one reusable default mapping. */
+export async function saveRecordMapping(mapping: ColumnMapping): Promise<ColumnMapping | null> {
+  const body = await requestJson<{ mapping: ColumnMapping | null }>(
+    '/api/v1/records/mappings',
+    jsonInit('PUT', { mapping }),
+  )
+  return body.mapping
+}
