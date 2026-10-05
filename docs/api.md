@@ -125,7 +125,15 @@ client could present to talk its way past a revoked session.
     "name": "Administrator",
     "status": "active",
     "roles": [{ "id": "rol_…", "name": "Admin" }],
-    "isAdmin": true
+    "isAdmin": true,
+    "permissions": [
+      "verify_user_info",
+      "verify_user_info_face",
+      "verify_user_info_idcard_face",
+      "verify_user_info_idcard_liveness",
+      "khmer_id_card_ocr",
+      "passport_ocr"
+    ]
   }
 }
 ```
@@ -197,13 +205,78 @@ A fresh database seeds idempotently by natural key (role name, admin email):
 | Role | Admin rights | Permissions |
 |------|--------------|-------------|
 | `Admin` | yes | all six |
-| `Senior Loan Officer` | yes | all six |
+| `Senior Loan Officer` | no | all six |
 | `Loan Officer` | no | `verify_user_info`, `verify_user_info_face` |
 
 plus the account `admin@gmail.com` / `P4ssw0rd!` holding `Admin` — a
 documented local placeholder (requirement 5); a deployment's first act is
 changing it. The auth tables live in the same database as everything else
 (`DATABASE_URL`), falling back to `var/auth.db` when no database is configured.
+
+---
+
+## Third-party integration · D19
+
+Two controls, one gate. **Post Settings** (the gear in the workspace header)
+and **Post to Core Systems** (beneath the Verification Response card) render
+only for accounts holding all six verification permissions — exactly `Admin`
+and `Senior Loan Officer` in the seeds — and every route below answers `403
+FORBIDDEN` with *"You need every verification permission to post to core
+systems."* for anyone else, before the handler runs. The browser's display
+gate mirrors that rule; it never replaces it.
+
+### `GET /api/v1/integrations/settings` · full-permission
+
+Every configured system. A password is never part of any response:
+
+```json
+{ "settings": [{ "id": "its_…", "url": "https://core.example/post", "apiUser": "svc_camdx" }] }
+```
+
+### `PUT /api/v1/integrations/settings` · full-permission
+
+Replaces the complete list:
+
+```json
+{
+  "settings": [
+    { "id": null, "url": "https://core-a.example/post", "apiUser": "svc_camdx", "apiPassword": "…" },
+    { "id": "its_…", "url": "https://core.example/post/v2", "apiUser": "svc_camdx", "apiPassword": "" }
+  ]
+}
+```
+
+An `id` names an existing row; a blank password for such a row keeps the
+stored one — the dialog cannot read a secret back just to send it again. A
+new row without a password is refused. Validation answers `400
+INVALID_REQUEST` with `fieldErrors` keyed
+`settings.<index>.<url|apiUser|apiPassword>`, and a refused save leaves the
+stored list untouched (all-or-nothing).
+
+### `POST /api/v1/integrations/post` · full-permission
+
+The verification response as `{ "payload": … }`, replayed to every configured
+system with HTTP Basic auth and a 10-second timeout per target. When
+something is configured the answer is always `200`, one entry per system:
+
+```json
+{
+  "posted": ["https://core-a.example/post"],
+  "failed": [{ "url": "https://core-b.example/post", "reason": "The system timed out." }]
+}
+```
+
+Reasons are fixed safe sentences — timed out, could not be reached, refused
+the API credentials, did not accept the submission — so no upstream body,
+host detail or driver text reaches the client (§28). With nothing configured
+the answer is `400 INVALID_REQUEST`: *"There are no core systems configured
+yet. Add one in Post Settings first."* — an empty success must never
+masquerade as delivery.
+
+The settings share the auth database (`DATABASE_URL`, else `var/auth.db`),
+which therefore holds the outbound credentials in recoverable form: they must
+be replayed on every post, but they are never returned by the API and never
+logged.
 
 ---
 

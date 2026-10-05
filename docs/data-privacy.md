@@ -187,7 +187,14 @@ of D18.
 | Party | Data received | Retention |
 |-------|---------------|-----------|
 | CamDigiKey | The specific artefact and identity fields an API requires | Governed by the CamDX agreement — must be reviewed before real mode |
+| The core systems configured in Post Settings (D19) | The verification response a posting click sends — the nine identity text fields, the method and its outcome — with HTTP Basic auth, only on demand, never automatically | This application retains nothing new; the receiver's own policy governs what it keeps |
 | Cloud/hosting | Whatever is deployed there | Operator's responsibility |
+
+Posting credentials (D19) sit in the same database as the accounts
+(`DATABASE_URL`, else `var/auth.db`): the outbound password must be replayable
+on every post, so it is stored recoverably — but no endpoint ever returns it
+(§29) and no log or error echoes it (§28). Treat that database as holding
+secrets.
 
 Before `CAMDX_MODE=real`, the CamDX data-processing terms must be reviewed: which
 artefacts reach their systems, how long they retain them, and whether face data is

@@ -171,6 +171,7 @@ layout change cannot quietly drop a requirement:
 | §25 section outcomes in one list | required sections append as rows beneath the nine fields; "Not checked" stays neutral |
 | one shared list (D16) | face method after API 1 keeps the nine rows and appends the face row; a refused retry keeps the previous list |
 | export defaults to all columns (D17) | untouched dialog downloads every column in all three formats; deselecting drops exactly that key; disabled with none left |
+| posting gate + write-only passwords (D19) | Loan Officer receives 403 on every integrations route and sees no Post buttons; settings responses never contain a stored password; a blank password on save keeps the stored one (checked against the store); a refused save leaves the list untouched |
 | §16 unread field | empty input plus "Please enter this information." |
 
 ### Why the face tests do not use a photograph
