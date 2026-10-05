@@ -1,21 +1,20 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { DocumentColumn } from './DocumentColumn'
 
 /**
- * Hover magnification on the uploaded card: the image grows around the point
- * under the pointer (the workspace's "read the small print" affordance), touch
- * is excluded, and the ± buttons keep working on top of it.
+ * The uploaded-card column: in-column ± zoom, and click-to-open preview in a
+ * modal (the card is too small in the column to read its fine print — §9).
  */
 
-function renderCard() {
-  const view = render(
+function renderCard(documentRef: string | null = 'art_0123456789abcdef') {
+  return render(
     // The column links back to the landing route, so a router context is needed.
     <MemoryRouter>
       <DocumentColumn
-        documentRef="art_0123456789abcdef"
+        documentRef={documentRef}
         fileName="card.jpg"
         height={800}
         state="ready"
@@ -23,98 +22,84 @@ function renderCard() {
       />
     </MemoryRouter>,
   )
-
-  const image = screen.getByRole('img', { name: /original id card/i })
-  // jsdom has no layout engine: supply the geometry a browser would report, so
-  // the pointer arithmetic under test receives real numbers.
-  Object.defineProperties(image, {
-    offsetLeft: { value: 10 },
-    offsetTop: { value: 5 },
-    offsetWidth: { value: 300 },
-    offsetHeight: { value: 200 },
-  })
-  const frame = image.parentElement as HTMLDivElement
-  vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue({
-    bottom: 260,
-    height: 260,
-    left: 0,
-    right: 400,
-    toJSON: () => ({}),
-    top: 0,
-    width: 400,
-    x: 0,
-    y: 0,
-  })
-
-  return { frame, image, view }
 }
 
-describe('hover zoom on the uploaded card', () => {
-  it('magnifies around the pointer, keeping the hovered point in place', () => {
-    const { frame, image } = renderCard()
+function cardButton() {
+  return screen.getByRole('button', { name: /open a larger preview/i })
+}
 
-    // Pointer at container (100, 100) → image coords (90, 95); scale 1 → 2.
-    fireEvent.pointerMove(frame, { clientX: 100, clientY: 100, pointerType: 'mouse' })
-
-    expect(image.style.transform).toBe('translate(-90px, -95px) scale(2)')
-    expect(image.style.transformOrigin).toBe('0 0')
-    // No transition mid-hover: the origin changes with the scale, and an
-    // animated origin swap would shift the image instead of gliding.
-    expect(image.className).not.toContain('transition-transform')
-  })
-
-  it('focuses the nearest edge when the pointer is over the frame, not the card', () => {
-    const { frame, image } = renderCard()
-
-    fireEvent.pointerMove(frame, { clientX: -50, clientY: -50, pointerType: 'mouse' })
-
-    expect(image.style.transform).toBe('translate(0px, 0px) scale(2)')
-  })
-
-  it('leaves touch input alone — a tap must not leave the card stuck magnified', () => {
-    const { frame, image } = renderCard()
-
-    fireEvent.pointerMove(frame, { clientX: 100, clientY: 100, pointerType: 'touch' })
-
-    expect(image.style.transform).toBe('scale(1)')
-    expect(image.style.transformOrigin).toBe('')
-  })
-
-  it('returns to the resting view when the pointer leaves', () => {
-    const { frame, image } = renderCard()
-
-    fireEvent.pointerMove(frame, { clientX: 100, clientY: 100, pointerType: 'mouse' })
-    fireEvent.pointerLeave(frame)
-
-    expect(image.style.transform).toBe('scale(1)')
-    expect(image.style.transformOrigin).toBe('')
-    expect(image.className).toContain('transition-transform')
-  })
-
-  it('stacks with the ± zoom: manual 150% plus hover reads as 300%', () => {
-    const { frame, image } = renderCard()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-    fireEvent.pointerMove(frame, { clientX: 100, clientY: 100, pointerType: 'mouse' })
-
-    expect(image.style.transform).toBe('translate(-180px, -190px) scale(3)')
-    expect(screen.getByText('150%')).toBeInTheDocument()
-  })
-
-  it('mentions the affordance once the card is on screen', () => {
+describe('the in-column preview', () => {
+  it('offers the modal preview and says so', () => {
     renderCard()
 
-    expect(screen.getByText(/hover over the card to magnify/i)).toBeInTheDocument()
+    expect(cardButton()).toBeInTheDocument()
+    expect(screen.getByText(/click the card to open a larger preview/i)).toBeInTheDocument()
   })
 
-  it('stays quiet while there is no card to magnify', () => {
-    render(
-      <MemoryRouter>
-        <DocumentColumn documentRef={null} fileName="card.jpg" height={800} state="ready" width={1280} />
-      </MemoryRouter>,
-    )
+  it('keeps the ± zoom scaling the in-column image', () => {
+    renderCard()
+    const image = screen.getByRole('img', { name: /original id card/i })
 
-    expect(screen.queryByText(/hover over the card to magnify/i)).not.toBeInTheDocument()
+    expect(image.style.transform).toBe('scale(1)')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(image.style.transform).toBe('scale(1.5)')
+    expect(screen.getByText('150%')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
+    expect(image.style.transform).toBe('scale(1)')
+  })
+
+  it('stays quiet while there is no card to preview', () => {
+    renderCard(null)
+
+    expect(screen.queryByRole('button', { name: /open a larger preview/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/click the card to open a larger preview/i)).not.toBeInTheDocument()
     expect(screen.getByText(/your document will appear here/i)).toBeInTheDocument()
+  })
+})
+
+describe('the preview modal', () => {
+  it('opens on click, showing the same artefact the column shows', () => {
+    renderCard()
+
+    fireEvent.click(cardButton())
+
+    const dialog = screen.getByRole('dialog', { name: 'ID card preview' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    const image = within(dialog).getByRole('img')
+    expect(image.getAttribute('src')).toContain('art_0123456789abcdef')
+  })
+
+  it('closes on the Close button and returns focus to the card', () => {
+    renderCard()
+    fireEvent.click(cardButton())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(cardButton())
+  })
+
+  it('closes on Escape', () => {
+    renderCard()
+    fireEvent.click(cardButton())
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(cardButton())
+  })
+
+  it('closes on a backdrop click but not on a click inside the dialog', () => {
+    renderCard()
+    fireEvent.click(cardButton())
+    const dialog = screen.getByRole('dialog', { name: 'ID card preview' })
+
+    fireEvent.click(dialog)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    fireEvent.click(dialog.parentElement!)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
