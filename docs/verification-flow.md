@@ -86,7 +86,7 @@ so the UI can react precisely, and no face is ever fabricated:
 The workspace shows two visually distinct things, and they are never conflated:
 
 ```text
-Column 2 "ID Card Face"                Report section "Face"
+Column 1 "ID Card Face"                 Report section "Face"
 ─────────────────────────────          ────────────────────────
 local OpenCV detection                 CamDigiKey verification
 badge: "Local detection —              "✓ Face verification
@@ -112,7 +112,7 @@ selected method
       ▼
 requirement matrix (fetched from GET /verification-methods)
       │
-      ├─ userInfo      → editable identity form (Column 3)
+      ├─ userInfo      → editable identity form (Column 2)
       ├─ currentFace   → FaceCapture panel
       ├─ idCard        → satisfied by the upload from `/`
       ├─ liveness      → LivenessFlow panel

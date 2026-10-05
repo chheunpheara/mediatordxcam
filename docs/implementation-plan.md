@@ -103,11 +103,11 @@ their directories exist: `app/domain/requirements.py`, `app/integrations/camdx/*
 **Scope** §8, §9, §12, §14, §31
 
 - Column 1: original document preview with zoom, filename, processing status,
-  replace
-- Column 2: extracted face with a persistent "local detection — not a verification"
-  notice (§13)
-- Column 3: editable identity form — all nine fields from §14, OCR-uncertain
+  replace; the extracted face sits beneath it with a persistent "local
+  detection — not a verification" notice (§13) — order per D14
+- Column 2: editable identity form — all nine fields from §14, OCR-uncertain
   fields flagged, empty fields prompting "Please enter this information."
+- Column 3: verification-method panel and Verify
 - Desktop 3-col / tablet 2-col / mobile stacked order per §31
 
 **Exit criteria**
@@ -257,3 +257,4 @@ their directories exist: `app/domain/requirements.py`, `app/integrations/camdx/*
 | D11 | Liveness is a session resource, not a single upload | §18 forbids presenting an upload as liveness |
 | D12 | Local Python is 3.14 but the project pins `>=3.11,<3.14` | `opencv-python` wheels lag new CPython releases; Docker pins 3.12 |
 | D13 | PostgreSQL joins the default compose stack, and verification compares the submitted identity against its sample records when `DATABASE_URL` is set (unset → fixture verification, the test default) | Supersedes D6/D7's opt-in: §4 allows persistence where application data is actually required, and the registry is the stand-in for CamDigiKey's record lookup that §26's partial results need. §29 is still honoured — no biometric data is stored, only the nine §14 text fields |
+| D14 | Workspace columns reordered: the face card sits beneath the document in column 1, the identity form takes column 2, the method panel column 3 | Demonstrated reading order — the face belongs under the card it came from, the form corrects that card next, and Verify closes the row; supersedes the column order §9 was written against |

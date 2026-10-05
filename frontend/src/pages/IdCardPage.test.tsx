@@ -15,9 +15,9 @@ import type { FaceExtraction, ProcessIdCardResponse } from '@/lib/api'
  * The three-column workspace (§8, §9, §12, §14).
  *
  * One test per column, then the guarantees that are easy to lose in a redesign:
- * that column 2 never claims verification, that column 3 renders exactly §14's
- * nine fields and keeps the user's corrections, and that nothing here ever shows
- * raw JSON or a fabricated face.
+ * that the face card never claims verification, that column 2 renders exactly
+ * §14's nine fields and keeps the user's corrections, and that nothing here
+ * ever shows raw JSON or a fabricated face.
  */
 
 beforeEach(() => {
@@ -133,7 +133,7 @@ describe('column 1 — the original document (§9)', () => {
   })
 })
 
-describe('column 2 — the ID card face (§12, §13)', () => {
+describe('column 1, beneath the document — the ID card face (§12, §13)', () => {
   it('shows only the face, not the whole card', async () => {
     const result = makeProcessingResult()
     await renderWorkspaceWithResult(result)
@@ -186,7 +186,7 @@ describe('column 2 — the ID card face (§12, §13)', () => {
   })
 })
 
-describe('column 3 — the editable KYC form (§14)', () => {
+describe('column 2 — the editable KYC form (§14)', () => {
   it('renders exactly the nine fields of §14, in order', async () => {
     await renderWorkspaceWithResult()
 
@@ -310,6 +310,18 @@ describe('column 3 — the editable KYC form (§14)', () => {
 })
 
 describe('workspace behaviour', () => {
+  it('lays the cards out in the D14 order: document, face, identity, method', async () => {
+    await renderWorkspaceWithResult()
+
+    const regions = await screen.findAllByRole('region')
+    expect(regions.map((region) => region.getAttribute('aria-label'))).toEqual([
+      'Original ID card',
+      'ID card face',
+      'Identity information',
+      'Verification method',
+    ])
+  })
+
   it('does not call the API when there is no document to process', () => {
     const fetchMock = stubProcessingFetch()
     renderAt('/id-card')

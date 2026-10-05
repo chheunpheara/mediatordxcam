@@ -14,21 +14,20 @@ import { useFaceCapture } from '../features/face-capture/FaceCaptureContext'
 import { clearSession } from '../lib/session'
 
 /**
- * Verification workspace (§8) — three columns.
+ * Verification workspace (§8) — three columns (order per D14).
  *
- * 1. the original document exactly as uploaded, with zoom (§9)
- * 2. the face OpenCV cut off that card (§12)
- * 3. the nine editable identity fields (§14)
+ * 1. the original document exactly as uploaded, with zoom (§9), and beneath it
+ *    the face OpenCV cut off that card (§12)
+ * 2. the nine editable identity fields (§14)
+ * 3. the verification-method panel, driven by the backend's requirement
+ *    configuration: the six methods and every disabled state are read from
+ *    `GET /api/v1/kyc/verification-methods` rather than written down in React
+ *    (§11)
  *
  * Processing normally happened on the landing page, before navigation (§6). A
  * direct visit to `/id-card` — a refresh, a bookmark — has a document in session
  * but no result, so the call is made here too instead of showing an empty
  * workspace.
- *
- * The verification-method panel sits beneath column 1 (§9). It is driven by the
- * backend's requirement configuration, so the six cards and every disabled state
- * are read from `GET /api/v1/kyc/verification-methods` rather than written down in
- * React (§11).
  *
  * Verification can only start once the chosen method's own inputs are present.
  * Today that means API 1: current-face capture is Phase 6 and liveness is Phase 7,
@@ -82,6 +81,7 @@ export function IdCardPage() {
       </div>
 
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
+        {/* Column 1 (D14): the card, and the face cut from it beneath. */}
         <div className="flex flex-col gap-4">
           <DocumentColumn
             documentRef={result?.documentRef ?? null}
@@ -90,21 +90,10 @@ export function IdCardPage() {
             state={state}
             width={document.dimensions.width}
           />
-          <VerificationProvider
-            inputs={{
-              identity: result === null ? null : resolveIdentity(result.ocr.fields, draft),
-              documentRef: result?.documentRef ?? null,
-              currentFaceRef: faceCapture.faceRef,
-              livenessRef: null,
-              idCardFaceRef: result?.face?.faceRef ?? null,
-            }}
-          >
-            <VerificationMethodPanel />
-          </VerificationProvider>
+          <FaceColumn face={result?.face ?? null} />
         </div>
 
-        <FaceColumn face={result?.face ?? null} />
-
+        {/* Column 2 (D14): the nine editable identity fields. */}
         {result ? (
           <IdentityForm hasDraft={Object.keys(draft).length > 0} ocr={result.ocr} />
         ) : (
@@ -115,6 +104,19 @@ export function IdCardPage() {
             </p>
           </section>
         )}
+
+        {/* Column 3 (D14): method picker and Verify. */}
+        <VerificationProvider
+          inputs={{
+            identity: result === null ? null : resolveIdentity(result.ocr.fields, draft),
+            documentRef: result?.documentRef ?? null,
+            currentFaceRef: faceCapture.faceRef,
+            livenessRef: null,
+            idCardFaceRef: result?.face?.faceRef ?? null,
+          }}
+        >
+          <VerificationMethodPanel />
+        </VerificationProvider>
       </div>
 
       {error ? (
