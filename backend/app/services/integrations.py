@@ -40,6 +40,10 @@ REASON_CREDENTIALS = "The system refused the API credentials."
 REASON_REJECTED = "The system did not accept the submission."
 NO_SETTINGS_MESSAGE = "There are no core systems configured yet. Add one in Post Settings first."
 
+#: What a connection test sends (D22): a fixed body with no subject data, so
+#: nothing personal leaves the browser before the admin has chosen to save (§29).
+TEST_PAYLOAD: dict[str, bool] = {"connectionTest": True}
+
 
 class IntegrationService:
     """Settings CRUD and the outbound post for core-systems (D19)."""
@@ -74,24 +78,14 @@ class IntegrationService:
         seen_ids: set[str] = set()
 
         for index, row in enumerate(rows):
-            url = (row.get("url") or "").strip()
-            api_user = (row.get("apiUser") or "").strip()
+            url = _clean_url(row.get("url"), f"settings.{index}.url")
+            api_user = _clean_api_user(row.get("apiUser"), f"settings.{index}.apiUser")
             api_password = row.get("apiPassword") or ""
             existing_id = row.get("id")
 
-            parsed = urlparse(url)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                raise _field_error(
-                    f"settings.{index}.url",
-                    "Enter a full system URL, starting with http:// or https://.",
-                )
-            if not api_user:
-                raise _field_error(f"settings.{index}.apiUser", "Enter the API user.")
-
             kept = existing_id if existing_id in by_id and existing_id not in seen_ids else None
             if kept is None:
-                if not api_password:
-                    raise _field_error(f"settings.{index}.apiPassword", "Enter the API password.")
+                _require_password(api_password, f"settings.{index}.apiPassword")
                 built.append(
                     IntegrationSetting(
                         id=new_setting_id(),
@@ -113,6 +107,50 @@ class IntegrationService:
 
         await asyncio.to_thread(self._store.replace_all, built)
         return built
+
+    async def test_connection(self, row: dict[str, str | None]) -> dict[str, Any]:
+        """Probe one draft row before it is saved (D22).
+
+        The same request a later save would make — one POST with HTTP Basic
+        and the shared timeout — but carrying `TEST_PAYLOAD` instead of a
+        verification response, because the admin is testing, not submitting.
+        The password follows the save rule: blank on an existing row means
+        the stored credential, exactly what a subsequent save would keep.
+        Validation answers `400` keyed by the bare field name.
+        """
+        url = _clean_url(row.get("url"), "url")
+        api_user = _clean_api_user(row.get("apiUser"), "apiUser")
+        api_password = row.get("apiPassword") or ""
+
+        if not api_password:
+            stored = None
+            existing_id = row.get("id")
+            if existing_id:
+                for setting in await asyncio.to_thread(self._store.list_settings):
+                    if setting.id == existing_id:
+                        stored = setting
+                        break
+            if stored is None:
+                _require_password(api_password, "apiPassword")
+            else:
+                api_password = stored.api_password
+
+        async with httpx.AsyncClient(
+            transport=self._transport, timeout=POST_TIMEOUT_SECONDS
+        ) as client:
+            try:
+                response = await client.post(
+                    url,
+                    json=TEST_PAYLOAD,
+                    auth=(api_user, api_password),
+                )
+            except httpx.TimeoutException:
+                return {"ok": False, "reason": REASON_TIMEOUT}
+            except httpx.TransportError:
+                return {"ok": False, "reason": REASON_UNREACHABLE}
+
+        reason = _reason_for_status(response.status_code)
+        return {"ok": reason is None, "reason": reason}
 
     async def post_to_core(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send `payload` to every configured system (D19).
@@ -145,15 +183,46 @@ class IntegrationService:
                 except httpx.TransportError:
                     failed.append({"url": target.url, "reason": REASON_UNREACHABLE})
                 else:
-                    if 200 <= response.status_code < 300:
+                    reason = _reason_for_status(response.status_code)
+                    if reason is None:
                         posted.append(target.url)
-                    elif response.status_code in (401, 403):
-                        failed.append({"url": target.url, "reason": REASON_CREDENTIALS})
                     else:
-                        failed.append({"url": target.url, "reason": REASON_REJECTED})
+                        failed.append({"url": target.url, "reason": reason})
 
         return {"posted": posted, "failed": failed}
 
 
 def _field_error(field: str, message: str) -> AppError:
     return AppError(ErrorCode.INVALID_REQUEST, message=message, field_errors={field: message})
+
+
+def _clean_url(url: str | None, field: str) -> str:
+    cleaned = (url or "").strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise _field_error(
+            field,
+            "Enter a full system URL, starting with http:// or https://.",
+        )
+    return cleaned
+
+
+def _clean_api_user(api_user: str | None, field: str) -> str:
+    cleaned = (api_user or "").strip()
+    if not cleaned:
+        raise _field_error(field, "Enter the API user.")
+    return cleaned
+
+
+def _require_password(password: str, field: str) -> None:
+    if not password:
+        raise _field_error(field, "Enter the API password.")
+
+
+def _reason_for_status(status_code: int) -> str | None:
+    """`None` for a success; otherwise the fixed safe sentence (§28)."""
+    if 200 <= status_code < 300:
+        return None
+    if status_code in (401, 403):
+        return REASON_CREDENTIALS
+    return REASON_REJECTED

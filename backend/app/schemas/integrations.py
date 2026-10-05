@@ -60,3 +60,14 @@ class PostToCoreResponse(ApiModel):
 
     posted: list[str]
     failed: list[PostFailureResponse]
+
+
+class TestConnectionResponse(ApiModel):
+    """`POST /api/v1/integrations/test` — probe one draft row (D22).
+
+    `reason` is `None` on success and one of the fixed safe sentences
+    otherwise (§28) — the same words the post reports, never upstream text.
+    """
+
+    ok: bool
+    reason: str | None = None

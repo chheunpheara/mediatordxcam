@@ -645,3 +645,19 @@ export async function postToCore(payload: VerifyResponse): Promise<PostToCoreRes
     jsonInit('POST', { payload }),
   )
 }
+
+/** Outcome of `POST /api/v1/integrations/test` (D22): `reason` is null on success, else a fixed safe sentence (§28). */
+export interface TestConnectionResponse {
+  readonly ok: boolean
+  readonly reason: string | null
+}
+
+/** Probe one row exactly as the dialog holds it, before anything is saved (D22). */
+export async function testConnection(
+  row: IntegrationSettingInput,
+): Promise<TestConnectionResponse> {
+  return requestJson<TestConnectionResponse>(
+    '/api/v1/integrations/test',
+    jsonInit('POST', row),
+  )
+}

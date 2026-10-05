@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchIntegrationSettings, postToCore, saveIntegrationSettings } from './api'
+import { fetchIntegrationSettings, postToCore, saveIntegrationSettings, testConnection } from './api'
 import type { ApiError } from './api'
 import { bodyOf, makeVerifyResult } from '../test/fixtures'
 
 /**
- * The integration client (D19): settings round-trip as one replace-all PUT,
- * the password travels only on the way in, and a post hands the server the
- * verification result as `{ payload }` — the shape the endpoint replays.
+ * The integration client (D19, D22): settings round-trip as one replace-all
+ * PUT, the password travels only on the way in, a post hands the server the
+ * verification result as `{ payload }` — the shape the endpoint replays — and
+ * a connection test posts one draft row as typed before anything is saved.
  */
 
 function stubJson(payload: unknown, status = 200) {
@@ -119,5 +120,29 @@ describe('postToCore', () => {
 
     expect(error.status).toBe(400)
     expect(error.message).toContain('no core systems configured')
+  })
+})
+
+describe('testConnection', () => {
+  it('probes one draft row exactly as held, and reads the fixed outcome (D22)', async () => {
+    const fetchMock = stubJson({ ok: false, reason: 'The system timed out.' })
+
+    const outcome = await testConnection({
+      id: 'set_1',
+      url: 'https://core.example/post',
+      apiUser: 'svc_camdx',
+      apiPassword: '',
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/v1/integrations/test')
+    expect(init.method).toBe('POST')
+    expect(bodyOf<Record<string, unknown>>(fetchMock.mock.calls[0]!)).toEqual({
+      id: 'set_1',
+      url: 'https://core.example/post',
+      apiUser: 'svc_camdx',
+      apiPassword: '',
+    })
+    expect(outcome).toEqual({ ok: false, reason: 'The system timed out.' })
   })
 })

@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { ApiError, fetchIntegrationSettings, saveIntegrationSettings } from '../../lib/api'
+import {
+  ApiError,
+  fetchIntegrationSettings,
+  saveIntegrationSettings,
+  testConnection,
+} from '../../lib/api'
 
 /**
  * The "Post Settings" dialog (D19): which core systems receive verification
@@ -11,6 +16,12 @@ import { ApiError, fetchIntegrationSettings, saveIntegrationSettings } from '../
  * blank there means exactly that. Every row's validation failure arrives as
  * `settings.<index>.<field>` and is rendered under the field it belongs to.
  *
+ * Each row also offers "Test Connection" (D22): the server probes the values
+ * as typed — a blank password on a saved row uses the stored credential, the
+ * rule a save keeps — and answers in fixed safe words, so a broken URL or
+ * refused credential is caught before anything is saved. Editing the row
+ * drops its stale result.
+ *
  * Three exits, like the export dialog: Close, Escape, the backdrop. Opening
  * moves focus to Close; closing returns it to the button that opened this.
  */
@@ -20,6 +31,7 @@ export function PostSettingsModal({ onClose }: { readonly onClose: () => void })
   const [saveError, setSaveError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({})
   const [saving, setSaving] = useState(false)
+  const [testResults, setTestResults] = useState<Readonly<Record<string, TestState>>>({})
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -55,6 +67,14 @@ export function PostSettingsModal({ onClose }: { readonly onClose: () => void })
     setRows((current) =>
       current === null ? current : current.map((row) => (row.key === key ? { ...row, ...patch } : row)),
     )
+    // A changed row invalidates its last probe — a green tick must never
+    // describe values that are no longer on screen.
+    setTestResults((current) => {
+      if (!(key in current)) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
   }
 
   const addRow = (): void => {
@@ -63,6 +83,41 @@ export function PostSettingsModal({ onClose }: { readonly onClose: () => void })
 
   const removeRow = (key: string): void => {
     setRows((current) => (current === null ? current : current.filter((row) => row.key !== key)))
+    setTestResults((current) => {
+      if (!(key in current)) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }
+
+  const handleTest = async (row: Row): Promise<void> => {
+    setTestResults((current) => ({
+      ...current,
+      [row.key]: { status: 'testing', message: '' },
+    }))
+    try {
+      const outcome = await testConnection({
+        id: row.id,
+        url: row.url.trim(),
+        apiUser: row.apiUser.trim(),
+        apiPassword: row.apiPassword,
+      })
+      setTestResults((current) => ({
+        ...current,
+        [row.key]: outcome.ok
+          ? { status: 'ok', message: 'Connection succeeded.' }
+          : { status: 'failed', message: outcome.reason ?? 'Something went wrong. Please try again.' },
+      }))
+    } catch (cause: unknown) {
+      setTestResults((current) => ({
+        ...current,
+        [row.key]: {
+          status: 'failed',
+          message: cause instanceof ApiError ? cause.message : 'Something went wrong. Please try again.',
+        },
+      }))
+    }
   }
 
   const handleSave = async (): Promise<void> => {
@@ -92,9 +147,7 @@ export function PostSettingsModal({ onClose }: { readonly onClose: () => void })
     }
   }
 
-  const incomplete =
-    rows !== null &&
-    rows.some((row) => !row.url.trim() || !row.apiUser.trim() || (row.id === null && !row.apiPassword))
+  const incomplete = rows !== null && rows.some(rowIncomplete)
 
   return (
     // Backdrop: a click anywhere outside the dialog closes it.
@@ -137,58 +190,79 @@ export function PostSettingsModal({ onClose }: { readonly onClose: () => void })
 
         {rows !== null && rows.length > 0 ? (
           <ul className="mt-5 space-y-4">
-            {rows.map((row, index) => (
-              <li className="border-border rounded-lg border p-4" key={row.key}>
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold">{`System ${index + 1}`}</h3>
-                  <button
-                    aria-label={`Remove system ${index + 1}`}
-                    className="text-ink-subtle hover:text-negative p-1"
-                    onClick={() => removeRow(row.key)}
-                    type="button"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
+            {rows.map((row, index) => {
+              const test = testResults[row.key]
+              return (
+                <li className="border-border rounded-lg border p-4" key={row.key}>
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold">{`System ${index + 1}`}</h3>
+                    <button
+                      aria-label={`Remove system ${index + 1}`}
+                      className="text-ink-subtle hover:text-negative p-1"
+                      onClick={() => removeRow(row.key)}
+                      type="button"
                     >
-                      <path d="M18 6 6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Field
-                    ariaLabel={`System ${index + 1} URL`}
-                    error={fieldErrors[`settings.${index}.url`]}
-                    label="System URL"
-                    onChange={(value) => update(row.key, { url: value })}
-                    placeholder="https://core.example/post"
-                    value={row.url}
-                  />
-                  <Field
-                    ariaLabel={`System ${index + 1} API user`}
-                    error={fieldErrors[`settings.${index}.apiUser`]}
-                    label="API user"
-                    onChange={(value) => update(row.key, { apiUser: value })}
-                    placeholder="svc_camdx"
-                    value={row.apiUser}
-                  />
-                  <Field
-                    ariaLabel={`System ${index + 1} API password`}
-                    error={fieldErrors[`settings.${index}.apiPassword`]}
-                    label="API password"
-                    onChange={(value) => update(row.key, { apiPassword: value })}
-                    placeholder={row.id === null ? 'Required' : 'Leave blank to keep'}
-                    type="password"
-                    value={row.apiPassword}
-                  />
-                </div>
-              </li>
-            ))}
+                      <svg
+                        aria-hidden="true"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M18 6 6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <Field
+                      ariaLabel={`System ${index + 1} URL`}
+                      error={fieldErrors[`settings.${index}.url`]}
+                      label="System URL"
+                      onChange={(value) => update(row.key, { url: value })}
+                      placeholder="https://core.example/post"
+                      value={row.url}
+                    />
+                    <Field
+                      ariaLabel={`System ${index + 1} API user`}
+                      error={fieldErrors[`settings.${index}.apiUser`]}
+                      label="API user"
+                      onChange={(value) => update(row.key, { apiUser: value })}
+                      placeholder="svc_camdx"
+                      value={row.apiUser}
+                    />
+                    <Field
+                      ariaLabel={`System ${index + 1} API password`}
+                      error={fieldErrors[`settings.${index}.apiPassword`]}
+                      label="API password"
+                      onChange={(value) => update(row.key, { apiPassword: value })}
+                      placeholder={row.id === null ? 'Required' : 'Leave blank to keep'}
+                      type="password"
+                      value={row.apiPassword}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <button
+                      className="btn-secondary px-3 py-1.5 text-xs"
+                      disabled={rowIncomplete(row) || saving || test?.status === 'testing'}
+                      onClick={() => void handleTest(row)}
+                      type="button"
+                    >
+                      {test?.status === 'testing' ? 'Testing…' : 'Test Connection'}
+                    </button>
+                    {test && test.status !== 'testing' ? (
+                      <p
+                        className={`text-xs ${test.status === 'ok' ? 'text-positive' : 'text-negative'}`}
+                        role={test.status === 'ok' ? 'status' : 'alert'}
+                      >
+                        {test.message}
+                      </p>
+                    ) : null}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         ) : rows !== null ? (
           <p className="text-ink-subtle mt-5 text-sm" role="status">
@@ -247,6 +321,17 @@ interface Row {
   readonly url: string
   readonly apiUser: string
   readonly apiPassword: string
+}
+
+/** A row's last "Test Connection" probe (D22); `message` is '' while in flight. */
+interface TestState {
+  readonly status: 'testing' | 'ok' | 'failed'
+  readonly message: string
+}
+
+/** The same bar for Save and Test: a row must be filled in to be checked. */
+function rowIncomplete(row: Row): boolean {
+  return !row.url.trim() || !row.apiUser.trim() || (row.id === null && !row.apiPassword)
 }
 
 let rowSequence = 0

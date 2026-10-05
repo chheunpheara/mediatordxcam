@@ -1,14 +1,16 @@
-"""Third-party posting settings over HTTP (D19).
+"""Third-party posting settings over HTTP (D19, D22).
 
 The access rule first — Admin and Senior Loan Officer (the two roles holding
 all six permissions) may manage the settings, Loan Officer may not — then the
 save contract: passwords are required for new rows, absent from every
 response, kept untouched when a save presents them blank, and a refused save
-leaves the stored list alone.
+leaves the stored list alone. `POST /test` (D22) probes one draft row before
+that save, with the same password rule and the same safe failure words.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator, Callable
 
@@ -361,6 +363,157 @@ class TestPostToCore:
         response = await client.post(
             "/api/v1/integrations/post", json={"payload": {"decision": "review"}}
         )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+class TestConnection:
+    """`POST /integrations/test` (D22): probe one draft row before saving."""
+
+    async def test_a_working_system_answers_ok_and_the_probe_is_impersonal(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        response = await client.post("/api/v1/integrations/test", json=ROW_A)
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"ok": True, "reason": None}
+        sent = target.requests[0]
+        assert str(sent.url) == ROW_A["url"]
+        assert sent.headers["authorization"].startswith("Basic ")
+        # A test is not a submission: fixed body, no subject data (§29).
+        assert json.loads(sent.content) == {"connectionTest": True}
+
+    async def test_refused_credentials_read_as_refused_credentials(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+        target.respond = lambda _request: httpx.Response(401, json={"error": "bad key"})
+
+        response = await client.post("/api/v1/integrations/test", json=ROW_A)
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": False,
+            "reason": "The system refused the API credentials.",
+        }
+        assert "bad key" not in response.text
+
+    async def test_a_timeout_is_reported_without_driver_text(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        def boom(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectTimeout("connect to 10.1.2.3:443 failed")
+
+        target.respond = boom  # type: ignore[assignment]
+        response = await client.post("/api/v1/integrations/test", json=ROW_A)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": False, "reason": "The system timed out."}
+        assert "10.1.2.3" not in response.text
+
+    async def test_an_unreachable_or_rejected_system_reads_in_safe_words(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        def unreachable(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("dns failure for core.internal")
+
+        target.respond = unreachable  # type: ignore[assignment]
+        refused = await client.post("/api/v1/integrations/test", json=ROW_A)
+        assert refused.json() == {"ok": False, "reason": "The system could not be reached."}
+
+        target.respond = lambda _request: httpx.Response(500, text="traceback at 10.0.0.7")
+        rejected = await client.post("/api/v1/integrations/test", json=ROW_A)
+        assert rejected.json() == {
+            "ok": False,
+            "reason": "The system did not accept the submission.",
+        }
+        assert "traceback" not in rejected.text
+        assert "10.0.0.7" not in rejected.text
+
+    async def test_a_blank_password_is_tested_with_the_stored_credential(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+        await _save_one_setting(client, ROW_A)
+        stored_id = (await client.get("/api/v1/integrations/settings")).json()["settings"][0]["id"]
+
+        response = await client.post(
+            "/api/v1/integrations/test",
+            json={**ROW_A, "id": stored_id, "apiPassword": ""},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["ok"] is True
+        # The Basic header carries the stored password — the rule a save keeps.
+        authorization = target.requests[0].headers["authorization"]
+        decoded = base64.b64decode(authorization.removeprefix("Basic ")).decode()
+        assert decoded == f"{ROW_A['apiUser']}:{ROW_A['apiPassword']}"
+
+    async def test_a_new_row_without_a_password_is_refused_before_any_request(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        response = await client.post(
+            "/api/v1/integrations/test",
+            json={"url": ROW_A["url"], "apiUser": "svc"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["fieldErrors"] == {"apiPassword": "Enter the API password."}
+        assert target.requests == []
+
+    async def test_an_unknown_row_id_cannot_stand_in_for_a_password(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        response = await client.post(
+            "/api/v1/integrations/test",
+            json={**ROW_A, "id": "its_gone", "apiPassword": ""},
+        )
+
+        assert response.status_code == 400
+        assert list(response.json()["error"]["fieldErrors"]) == ["apiPassword"]
+        assert target.requests == []
+
+    async def test_a_url_must_be_a_full_http_address(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, target = posting_client
+        await _login_admin(client)
+
+        response = await client.post(
+            "/api/v1/integrations/test",
+            json={"url": "core.internal", "apiUser": "svc", "apiPassword": "x"},
+        )
+
+        assert response.status_code == 400
+        assert list(response.json()["error"]["fieldErrors"]) == ["url"]
+        assert target.requests == []
+
+    async def test_a_loan_officer_cannot_test(
+        self, posting_client: tuple[AsyncClient, _Target]
+    ) -> None:
+        client, _target = posting_client
+        await _login_admin(client)
+        await _create_user_with_role(client, "loan@example.com", "Loan Officer")
+
+        response = await client.post("/api/v1/integrations/test", json=ROW_A)
 
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"

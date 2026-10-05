@@ -11,6 +11,7 @@ Routes:
 ```text
 GET  /api/v1/integrations/settings   configured targets (never passwords)
 PUT  /api/v1/integrations/settings   replace the whole list
+POST /api/v1/integrations/test       probe one system before saving it (D22)
 POST /api/v1/integrations/post       send a verification response to them all
 ```
 """
@@ -22,12 +23,14 @@ from fastapi import APIRouter, Depends
 from app.api.deps import CorePostUserDep, IntegrationServiceDep, require_core_post
 from app.infrastructure.integration_store import IntegrationSetting
 from app.schemas.integrations import (
+    IntegrationSettingInput,
     IntegrationSettingResponse,
     IntegrationSettingsResponse,
     PostFailureResponse,
     PostToCoreRequest,
     PostToCoreResponse,
     SaveIntegrationSettingsRequest,
+    TestConnectionResponse,
 )
 
 router = APIRouter(
@@ -67,6 +70,26 @@ async def save_settings(
 def _setting_response(setting: IntegrationSetting) -> IntegrationSettingResponse:
     """The wire shape — deliberately without `api_password` (§29)."""
     return IntegrationSettingResponse(id=setting.id, url=setting.url, apiUser=setting.api_user)
+
+
+@router.post("/test", response_model=TestConnectionResponse)
+async def test_connection(
+    body: IntegrationSettingInput,
+    service: IntegrationServiceDep,
+    _user: CorePostUserDep,
+) -> TestConnectionResponse:
+    """Probe one system with the values as typed, before anything is saved (D22).
+
+    The row arrives exactly as the dialog holds it: a blank password on an
+    existing row uses the stored credential — the same rule a save applies —
+    so "Test Connection" answers for the configuration the admin is about to
+    keep. The answer is always a `200` describing reachability and auth in
+    the post's fixed safe words (§28); only malformed input is an error.
+    """
+    outcome = await service.test_connection(
+        {"id": body.id, "url": body.url, "apiUser": body.apiUser, "apiPassword": body.apiPassword}
+    )
+    return TestConnectionResponse(**outcome)
 
 
 @router.post("/post", response_model=PostToCoreResponse)

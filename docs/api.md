@@ -215,10 +215,11 @@ changing it. The auth tables live in the same database as everything else
 
 ---
 
-## Third-party integration · D19
+## Third-party integration · D19, D22
 
 Two controls, one gate. **Post Settings** (the gear in the workspace header)
-and **Post to Core Systems** (beneath the Verification Response card) render
+— including the per-row **Test Connection** probe (D22) — and **Post to Core
+Systems** (beneath the Verification Response card) render
 only for accounts holding all six verification permissions — exactly `Admin`
 and `Senior Loan Officer` in the seeds — and every route below answers `403
 FORBIDDEN` with *"You need every verification permission to post to core
@@ -252,6 +253,29 @@ new row without a password is refused. Validation answers `400
 INVALID_REQUEST` with `fieldErrors` keyed
 `settings.<index>.<url|apiUser|apiPassword>`, and a refused save leaves the
 stored list untouched (all-or-nothing).
+
+### `POST /api/v1/integrations/test` · full-permission
+
+Probes one system **before** it is saved — the row exactly as the dialog
+holds it:
+
+```json
+{ "id": "its_…", "url": "https://core.example/post", "apiUser": "svc_camdx", "apiPassword": "" }
+```
+
+A blank password for an existing row uses the stored credential (the same
+rule `PUT` applies); a new or unknown row without one is refused. The probe
+is one POST with HTTP Basic auth and the same 10-second timeout as a real
+post, but carrying only `{ "connectionTest": true }` — a test never carries
+subject data (§29). The answer is always `200`:
+
+```json
+{ "ok": true, "reason": null }
+```
+
+with `reason` one of the four fixed sentences below when `ok` is `false`.
+Malformed input answers `400 INVALID_REQUEST` with `fieldErrors` keyed by
+the bare field name (`url`, `apiUser`, `apiPassword`).
 
 ### `POST /api/v1/integrations/post` · full-permission
 
