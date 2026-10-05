@@ -17,7 +17,7 @@ one left behind by its predecessor.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import AppEnvironment, Settings, get_settings
+from app.infrastructure.db import init_database
 from app.main import create_app
 from tests.fixtures.images import card_with_face, card_without_face
 
@@ -37,6 +38,10 @@ def _isolate_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterat
     monkeypatch.setenv("OCR_PROVIDER", "mock")
     monkeypatch.setenv("LOG_SENSITIVE_PAYLOADS", "false")
     monkeypatch.setenv("APP_ENV", AppEnvironment.LOCAL.value)
+    # Sign-in is off for every test (D18): the suite exercises behaviour, not
+    # credentials, and a forced `false` here is what lets all pre-auth tests
+    # pass unchanged. Auth tests opt back in with `Settings(auth_enabled=True)`.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     # Empty, not unset: `.env` may set a DSN, and only an explicit empty value
     # overrides the file (the field validator then maps it back to "no registry").
     monkeypatch.setenv("DATABASE_URL", "")
@@ -89,6 +94,52 @@ def face_card_bytes() -> bytes:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture
+def auth_url(tmp_path: Path) -> str:
+    """A private SQLite DSN with the identity samples seeded (D18 tests).
+
+    One file plays both parts: the auth tables are created by the account store
+    itself, and the identity rows this seeds let `POST /verify` succeed for the
+    permission tests — auth-on, registry-on, no container (testing rule 5).
+    """
+    url = f"sqlite:///{tmp_path / 'auth.db'}"
+    init_database(url)
+    return url
+
+
+@pytest.fixture
+def auth_settings(auth_url: str, tmp_path: Path) -> Settings:
+    """Settings with sign-in enabled against `auth_url`."""
+    return Settings(
+        camdx_mode="mock",
+        app_env=AppEnvironment.LOCAL,
+        log_sensitive_payloads=False,
+        temp_storage_dir=tmp_path / "tmp",
+        database_url=auth_url,
+        auth_enabled=True,
+    )
+
+
+@pytest.fixture
+async def auth_client(
+    auth_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[AsyncClient]:
+    """An in-process client whose app enforces sign-in (D18).
+
+    `SettingsDep` resolves from the process-wide cache, so the environment —
+    not just `create_app(settings)` — must say `AUTH_ENABLED=true`, exactly as
+    `test_identity_registry.py` does for its DSN. The cookie jar is shared
+    across requests in one test: login once, then act as that user.
+    """
+    monkeypatch.setenv("DATABASE_URL", auth_settings.database_url or "")
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    get_settings.cache_clear()
+    app = create_app(auth_settings)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    get_settings.cache_clear()
 
 
 def assert_no_sensitive_data(text: str, *, secrets: list[str]) -> None:

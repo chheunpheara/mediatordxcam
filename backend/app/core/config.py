@@ -144,6 +144,17 @@ class Settings(BaseSettings):
         default=60, ge=5, description="Temp artefact sweeper cadence."
     )
 
+    # -- Authentication / RBAC (D18) ---------------------------------------
+    auth_enabled: bool = Field(
+        default=True,
+        description=(
+            "Require a signed-in user for the whole API and enforce the six "
+            "CamDigiKey method permissions. Forced off in tests, which is why "
+            "the suite needs no credentials; never disable it in a deployed "
+            "environment."
+        ),
+    )
+
     # -- Database (§4, D13) ------------------------------------------------
     # The sample identity records verification compares against. Unset (or
     # empty) selects fixture verification — no database, no connection, which

@@ -14,6 +14,8 @@
  * that sentence and never a status line, a stack trace or raw JSON (§24, §28).
  */
 
+import { AUTH_EXPIRED_EVENT } from './auth'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 /** Mirrors `app/domain/enums.py::FaceExtractionStatus` (§12). */
@@ -99,6 +101,8 @@ interface ErrorEnvelope {
     readonly code?: string
     readonly message?: string
     readonly requestId?: string
+    /** Per-field messages for form validation (D18), keyed by form field. */
+    readonly fieldErrors?: Readonly<Record<string, string>>
   }
 }
 
@@ -113,13 +117,21 @@ export class ApiError extends Error {
   readonly code: string
   readonly status: number
   readonly requestId: string | undefined
+  readonly fieldErrors: Readonly<Record<string, string>>
 
-  constructor(code: string, message: string, status: number, requestId?: string) {
+  constructor(
+    code: string,
+    message: string,
+    status: number,
+    requestId?: string,
+    fieldErrors: Readonly<Record<string, string>> = {},
+  ) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.status = status
     this.requestId = requestId
+    this.fieldErrors = fieldErrors
   }
 }
 
@@ -141,17 +153,28 @@ async function toApiError(response: Response): Promise<ApiError> {
   let code = 'UNKNOWN'
   let message = 'Something went wrong. Please try again.'
   let requestId: string | undefined
+  let fieldErrors: Readonly<Record<string, string>> = {}
+
+  // A 401 anywhere means the session is gone (expired, revoked, account
+  // disabled). Announce it once, here, rather than making every caller
+  // remember: `AuthProvider` clears the local profile and the route guards
+  // take the user to the sign-in page. A failed sign-in is also a 401, but by
+  // then the profile is already absent, so the event is a harmless no-op.
+  if (response.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+  }
 
   try {
     const body = (await response.json()) as ErrorEnvelope
     code = body.error?.code ?? code
     message = body.error?.message ?? message
     requestId = body.error?.requestId
+    fieldErrors = body.error?.fieldErrors ?? {}
   } catch {
     // A non-JSON body (a proxy error page, say) is not something to show.
   }
 
-  return new ApiError(code, message, response.status, requestId)
+  return new ApiError(code, message, response.status, requestId, fieldErrors)
 }
 
 /**
@@ -364,4 +387,180 @@ export class RequirementsNotMetError extends ApiError {
     this.name = 'RequirementsNotMetError'
     this.missing = missing
   }
+}
+/* ---------------------------------------------------------------------------
+ * Sign-in and account administration (D18)
+ *
+ * The session is a cookie: `fetch` sends it on its own for same-origin calls,
+ * so none of this code ever reads or writes a token. Responses carry the
+ * account's profile, which the auth storage keeps for display and guards —
+ * permissions are re-derived server-side on every request, never trusted from
+ * what is cached here.
+ * ------------------------------------------------------------------------- */
+
+export type UserStatus = 'active' | 'disabled'
+
+/** A role reference as embedded in a user (`RoleSummaryResponse`). */
+export interface AuthRoleRef {
+  readonly id: string
+  readonly name: string
+}
+
+/** One account (`UserResponse`). Passwords never appear in any response. */
+export interface AuthUser {
+  readonly id: string
+  readonly email: string
+  readonly name: string
+  readonly status: UserStatus
+  readonly roles: readonly AuthRoleRef[]
+  readonly isAdmin: boolean
+}
+
+export interface LoginResponse {
+  readonly token: string
+  readonly user: AuthUser
+}
+
+/** One assignable permission, labelled exactly as the method card labels it. */
+export interface PermissionItem {
+  readonly key: VerificationMethodId
+  readonly label: string
+  readonly officialName: string
+}
+
+/** A role with its permission keys — what the matrix renders. */
+export interface AdminRole {
+  readonly id: string
+  readonly name: string
+  readonly isAdmin: boolean
+  readonly permissions: readonly VerificationMethodId[]
+}
+
+export interface CreateUserInput {
+  readonly email: string
+  readonly name: string
+  readonly password: string
+  readonly roleIds: readonly string[]
+}
+
+export interface UpdateUserInput {
+  readonly name?: string
+  readonly roleIds?: readonly string[]
+  readonly status?: UserStatus
+  readonly password?: string
+}
+
+export interface CreateRoleInput {
+  readonly name: string
+  readonly isAdmin: boolean
+}
+
+/**
+ * One JSON round-trip with the shared failure handling.
+ *
+ * Every authenticated endpoint below differs only in path and payload, so the
+ * network/parse/error dance lives here once — the same rule the feature code
+ * follows: a rejected call throws `ApiError` carrying the server's sentence.
+ */
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(apiUrl(path), init)
+  } catch {
+    throw new ApiError('NETWORK_ERROR', NETWORK_ERROR_MESSAGE, 0)
+  }
+
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+  if (response.status === 204) {
+    return undefined as T
+  }
+  return (await response.json()) as T
+}
+
+function jsonInit(method: string, body?: unknown): RequestInit {
+  const init: RequestInit =
+    body === undefined
+      ? { method, headers: { 'Content-Type': 'application/json' } }
+      : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  return init
+}
+
+/** `POST /api/v1/auth/login`. Sets the session cookie on success. */
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  return requestJson<LoginResponse>('/api/v1/auth/login', jsonInit('POST', { email, password }))
+}
+
+/** `POST /api/v1/auth/logout`. Idempotent: signing out twice is not an error. */
+export async function logout(): Promise<void> {
+  await requestJson<void>('/api/v1/auth/logout', jsonInit('POST', {}))
+}
+
+/** The six assignable permissions (`GET /api/v1/admin/permissions`). */
+export async function fetchPermissions(): Promise<readonly PermissionItem[]> {
+  const body = await requestJson<{ permissions: PermissionItem[] }>('/api/v1/admin/permissions')
+  return body.permissions
+}
+
+/** Every account (`GET /api/v1/admin/users`). */
+export async function fetchUsers(): Promise<readonly AuthUser[]> {
+  const body = await requestJson<{ users: AuthUser[] }>('/api/v1/admin/users')
+  return body.users
+}
+
+/** `POST /api/v1/admin/users` — create an account (201). */
+export async function createUser(input: CreateUserInput): Promise<AuthUser> {
+  return requestJson<AuthUser>('/api/v1/admin/users', jsonInit('POST', input))
+}
+
+/** `PATCH /api/v1/admin/users/{id}` — omitted fields stay unchanged. */
+export async function updateUser(id: string, input: UpdateUserInput): Promise<AuthUser> {
+  return requestJson<AuthUser>(
+    `/api/v1/admin/users/${encodeURIComponent(id)}`,
+    jsonInit('PATCH', input),
+  )
+}
+
+/** `DELETE /api/v1/admin/users/{id}` — never yourself, never the last admin. */
+export async function deleteUser(id: string): Promise<void> {
+  await requestJson<void>(`/api/v1/admin/users/${encodeURIComponent(id)}`, jsonInit('DELETE'))
+}
+
+/** Every role with its permissions (`GET /api/v1/admin/roles`). */
+export async function fetchRoles(): Promise<readonly AdminRole[]> {
+  const body = await requestJson<{ roles: AdminRole[] }>('/api/v1/admin/roles')
+  return body.roles
+}
+
+/** `POST /api/v1/admin/roles` — create a role (201). */
+export async function createRole(input: CreateRoleInput): Promise<AdminRole> {
+  return requestJson<AdminRole>('/api/v1/admin/roles', jsonInit('POST', input))
+}
+
+/** `PATCH /api/v1/admin/roles/{id}` — rename or toggle admin rights. */
+export async function updateRole(
+  id: string,
+  input: { readonly name?: string; readonly isAdmin?: boolean },
+): Promise<AdminRole> {
+  return requestJson<AdminRole>(
+    `/api/v1/admin/roles/${encodeURIComponent(id)}`,
+    jsonInit('PATCH', input),
+  )
+}
+
+/** `PUT /api/v1/admin/roles/{id}/permissions` — replace the whole set. */
+export async function setRolePermissions(
+  id: string,
+  permissions: readonly VerificationMethodId[],
+): Promise<AdminRole> {
+  return requestJson<AdminRole>(
+    `/api/v1/admin/roles/${encodeURIComponent(id)}/permissions`,
+    jsonInit('PUT', { permissions }),
+  )
+}
+
+/** `DELETE /api/v1/admin/roles/{id}` — refused while a user still holds it. */
+export async function deleteRole(id: string): Promise<void> {
+  await requestJson<void>(`/api/v1/admin/roles/${encodeURIComponent(id)}`, jsonInit('DELETE'))
 }

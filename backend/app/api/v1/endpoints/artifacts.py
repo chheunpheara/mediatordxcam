@@ -16,15 +16,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Depends, Response, status
 
-from app.api.deps import ArtifactStoreDep
+from app.api.deps import ArtifactStoreDep, current_user
 from app.core.errors import AppError, ErrorCode
 from app.schemas.common import error_responses
 
 logger = logging.getLogger("camdx.api.artifacts")
 
-router = APIRouter(tags=["kyc"])
+router = APIRouter(tags=["kyc"], dependencies=[Depends(current_user)])
 
 #: Correct types for the artefacts this application produces. Mirrors the accept
 #: list in `app/services/uploads.py`; a type absent here is refused rather than

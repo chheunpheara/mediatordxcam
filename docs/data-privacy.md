@@ -155,17 +155,30 @@ unsafe for any shared environment.
 
 ## 6. Access control
 
-- Artefacts are reachable only through their opaque handle.
-- Handles are unguessable (UUID4), time-limited, and unbound to any long-lived
-  session token.
+- Every API route requires a signed-in session (D18): an opaque, server-side
+  token delivered as an `HttpOnly` cookie, valid for 12 hours, deleted on
+  logout and invalidated the moment an account is disabled.
+- Sign-in is only the gate. Each user holds one or more roles whose
+  permissions are the six verification methods, so a user without a method's
+  permission is refused at `/verify` and sees the method marked unavailable —
+  independently of what their browser renders.
+- The administrator area (accounts, roles, the permission matrix) is reachable
+  only with a role carrying admin rights; the server re-derives that from the
+  session on every call, so no cached profile can grant it.
+- Passwords are stored only as scrypt hashes; no response schema can carry a
+  password or hash (§30). The seeded local admin credential is a documented
+  placeholder, not a production secret.
+- Artefacts remain reachable through their opaque handle alone: handles are
+  unguessable (UUID4), time-limited, and still unbound to any account — a
+  signed-in user who somehow learns a handle can read that artefact until it
+  expires, mitigated by the short TTL.
 - Phase 10 adds rate limiting to `id-card/process`, `verify` and the artefact
   endpoint to prevent handle-probing or resource abuse.
 
-This is a prototype without user accounts. That is a deliberate, documented
-limitation: there is no authentication layer, so anyone with a handle can read
-that artefact until it expires. The mitigation is the short TTL plus
-unguessable handles. Adding accounts is the first task if this leaves a
-development environment.
+Accounts (requirement 5) now exist, so "anyone with a handle" has narrowed to
+"any signed-in account with a handle". Binding every artefact to the account
+that produced it is the natural next tightening and is deliberately not part
+of D18.
 
 ---
 

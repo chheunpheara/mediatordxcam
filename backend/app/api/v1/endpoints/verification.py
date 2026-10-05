@@ -10,9 +10,11 @@ disabled button is a convenience and never the enforcement (§11).
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.api.deps import KycServiceDep
+from app.api.deps import CurrentUserDep, KycServiceDep, current_user
+from app.core.errors import AppError, ErrorCode
+from app.domain.auth import User
 from app.domain.enums import RequirementFlag, VerificationMethod
 from app.domain.requirements import MethodRequirements, requirements_for
 from app.integrations.camdx.verify import VerificationOutcome
@@ -26,7 +28,12 @@ from app.schemas.verification import (
     VerifyResponse,
 )
 
-router = APIRouter(tags=["verification"])
+router = APIRouter(tags=["verification"], dependencies=[Depends(current_user)])
+
+#: Why a method cannot run *for this account* (D18). Shown both on the method
+#: card (via `unavailableReason`) and as the `403` sentence from `verify`, so
+#: the two places never phrase the same refusal differently.
+NO_ACCESS_REASON = "Your account does not have access to this verification method."
 
 #: Why a method cannot run yet, keyed by the missing input. Plain language for the
 #: method card (§10); never a phase number or an internal note.
@@ -45,15 +52,21 @@ _UNAVAILABLE_REASON: dict[RequirementFlag, str] = {
     response_model=VerificationMethodsResponse,
     summary="List the six CamDigiKey verification methods and their requirements",
 )
-async def verification_methods(service: KycServiceDep) -> VerificationMethodsResponse:
+async def verification_methods(
+    service: KycServiceDep, user: CurrentUserDep
+) -> VerificationMethodsResponse:
     """Return all six methods with the inputs each one requires (§19, §11).
 
     All six are listed even when three cannot run yet: §9 requires the six
     official methods to be displayed, and hiding the pending ones would make the
     app look like it supports fewer than it does. `available` carries the truth.
+
+    A method this account may not call is listed the same way — disabled with a
+    reason — so §9's "all six visible" and the RBAC scope (D18) both hold, and
+    the frontend needs no permission logic of its own.
     """
     return VerificationMethodsResponse(
-        methods=[_to_response(requirements) for requirements in service.list_methods()]
+        methods=[_to_response(requirements, user) for requirements in service.list_methods()]
     )
 
 
@@ -62,12 +75,18 @@ async def verification_methods(service: KycServiceDep) -> VerificationMethodsRes
     response_model=VerifyResponse,
     summary="Verify identity with one of the six CamDigiKey APIs",
 )
-async def verify(request: VerifyRequest, service: KycServiceDep) -> VerifyResponse:
+async def verify(
+    request: VerifyRequest, service: KycServiceDep, user: CurrentUserDep
+) -> VerifyResponse:
     """Run one verification method (§19).
 
-    Fails with `REQUIREMENTS_NOT_MET` when the request omits an input the chosen
-    method needs, before any upstream call is attempted (§11).
+    Two gates, in order: the account must hold the permission for the requested
+    method (`FORBIDDEN`, D18), then the request must carry every input that
+    method needs (`REQUIREMENTS_NOT_MET`, §11) — both before any upstream call.
     """
+    if request.method not in user.permissions:
+        raise AppError(ErrorCode.FORBIDDEN, message=NO_ACCESS_REASON)
+
     identity = request.userInformation.as_dict() if request.userInformation else None
 
     outcome = await service.verify(
@@ -81,8 +100,10 @@ async def verify(request: VerifyRequest, service: KycServiceDep) -> VerifyRespon
     return _to_verify_response(outcome)
 
 
-def _to_response(requirements: MethodRequirements) -> MethodRequirementsResponse:
+def _to_response(requirements: MethodRequirements, user: User) -> MethodRequirementsResponse:
     flags = requirements.requires
+    permitted = requirements.method in user.permissions
+    available = requirements.is_satisfiable and not requirements.is_ocr and permitted
     return MethodRequirementsResponse(
         method=requirements.method,
         officialName=requirements.official_name,
@@ -93,14 +114,22 @@ def _to_response(requirements: MethodRequirements) -> MethodRequirementsResponse
         requiresLiveness=RequirementFlag.LIVENESS in flags,
         requiresPassport=RequirementFlag.PASSPORT in flags,
         isOcr=requirements.is_ocr,
-        available=requirements.is_satisfiable and not requirements.is_ocr,
-        unavailableReason=_reason_for(flags, is_ocr=requirements.is_ocr),
+        available=available,
+        unavailableReason=_reason_for(requirements, permitted=permitted),
     )
 
 
-def _reason_for(flags: frozenset[RequirementFlag], *, is_ocr: bool) -> str | None:
-    """First blocking reason for a method card, or `None` when it can run."""
-    if is_ocr:
+def _reason_for(requirements: MethodRequirements, *, permitted: bool) -> str | None:
+    """First blocking reason for a method card, or `None` when it can run.
+
+    Scope first (D18): an account without the permission is told about *that*,
+    not about the missing liveness input it was never going to be allowed to
+    use anyway.
+    """
+    if not permitted:
+        return NO_ACCESS_REASON
+    flags = requirements.requires
+    if requirements.is_ocr:
         return "This is a document read, not a verification. It runs when you process a document."
     if RequirementFlag.LIVENESS in flags:
         return _UNAVAILABLE_REASON[RequirementFlag.LIVENESS]

@@ -1,11 +1,30 @@
 import {
   IDENTITY_FIELDS,
+  type AuthUser,
   type FaceCaptureResponse,
   type IdentityFieldOutcome,
   type ProcessIdCardResponse,
   type VerificationMethod,
   type VerifyResponse,
 } from '@/lib/api'
+
+/**
+ * A signed-in administrator (D18).
+ *
+ * `setup.ts` writes this into auth storage before every test — the app is
+ * gated, and the existing page tests must keep rendering their own page. A
+ * test that wants a signed-out or non-admin visitor clears or replaces the
+ * stored profile first.
+ */
+export const TEST_AUTH_USER: AuthUser = {
+  id: 'user_test_admin',
+  email: 'admin@gmail.com',
+  name: 'Test Admin',
+  status: 'active',
+  roles: [{ id: 'role_admin', name: 'Admin' }],
+  isAdmin: true,
+}
+
 
 /**
  * The URL of a stubbed `fetch` call.

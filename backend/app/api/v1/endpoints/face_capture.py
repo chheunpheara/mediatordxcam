@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 
-from app.api.deps import ArtifactStoreDep, FaceServiceDep, SettingsDep
+from app.api.deps import ArtifactStoreDep, FaceServiceDep, SettingsDep, current_user
 from app.api.v1.endpoints.id_card import _read_capped
 from app.schemas.common import error_responses
 from app.schemas.kyc import FaceBoxResponse, FaceCaptureResponse
 from app.services.uploads import validate_image_upload
 
-router = APIRouter(tags=["face-capture"])
+router = APIRouter(tags=["face-capture"], dependencies=[Depends(current_user)])
 
 
 @router.post(

@@ -38,6 +38,14 @@ tests/
 5. **No skipped tests.** A test that cannot run is deleted, not skipped.
 6. **Deterministic outcomes.** Mock results are selected by documented trigger
    codes, never by randomness (`docs/camdx-integration.md` §3).
+7. **The authentication gate is switched off for everything except the tests
+   that test it** (D18). Backend: `conftest.py` forces `AUTH_ENABLED=false`, so
+   `current_user` answers with the development superuser and the ~350 tests
+   written before accounts exist keep their meaning; `auth_client` and
+   `test_auth.py` / `test_admin_accounts.py` re-enable it per-test against a
+   temporary SQLite store. Frontend: `src/test/setup.ts` seeds a signed-in
+   administrator into auth storage before every test (the whole app is gated),
+   and the auth tests clear or replace that profile themselves.
 
 ---
 

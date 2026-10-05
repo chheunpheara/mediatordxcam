@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
-from app.api.deps import DocumentProcessorDep, SettingsDep
+from app.api.deps import DocumentProcessorDep, SettingsDep, current_user
 from app.core.errors import AppError, ErrorCode
 from app.schemas.common import error_responses
 from app.schemas.kyc import (
@@ -28,7 +28,7 @@ from app.services.uploads import validate_image_upload
 
 logger = logging.getLogger("camdx.api.id_card")
 
-router = APIRouter(tags=["kyc"])
+router = APIRouter(tags=["kyc"], dependencies=[Depends(current_user)])
 
 
 @router.post(

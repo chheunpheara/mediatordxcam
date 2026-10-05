@@ -50,6 +50,10 @@ class ErrorCode(StrEnum):
     REQUIREMENTS_NOT_MET = "REQUIREMENTS_NOT_MET"
     INVALID_STATE_TRANSITION = "INVALID_STATE_TRANSITION"
 
+    # -- Authentication / authorization (D18) ------------------------------
+    UNAUTHENTICATED = "UNAUTHENTICATED"
+    FORBIDDEN = "FORBIDDEN"
+
     # -- Face handling (§12, §13) ------------------------------------------
     FACE_NOT_DETECTED = "FACE_NOT_DETECTED"
     MULTIPLE_FACES_DETECTED = "MULTIPLE_FACES_DETECTED"
@@ -102,6 +106,8 @@ USER_MESSAGES: dict[ErrorCode, str] = {
     ),
     ErrorCode.REQUIREMENTS_NOT_MET: "Some required information is missing.",
     ErrorCode.INVALID_STATE_TRANSITION: "That step is not available right now.",
+    ErrorCode.UNAUTHENTICATED: "Please sign in to continue.",
+    ErrorCode.FORBIDDEN: "You do not have access to do that.",
     ErrorCode.FACE_NOT_DETECTED: "We couldn't detect a face on this ID Card.",
     ErrorCode.MULTIPLE_FACES_DETECTED: (
         "Multiple faces were detected. Please upload a valid ID Card image."
@@ -144,6 +150,8 @@ DEFAULT_STATUS: dict[ErrorCode, int] = {
     ErrorCode.IMAGE_TOO_LOW_RESOLUTION: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ErrorCode.REQUIREMENTS_NOT_MET: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ErrorCode.INVALID_STATE_TRANSITION: status.HTTP_409_CONFLICT,
+    ErrorCode.UNAUTHENTICATED: status.HTTP_401_UNAUTHORIZED,
+    ErrorCode.FORBIDDEN: status.HTTP_403_FORBIDDEN,
     ErrorCode.FACE_NOT_DETECTED: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ErrorCode.MULTIPLE_FACES_DETECTED: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ErrorCode.FACE_QUALITY_TOO_LOW: status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -271,8 +279,10 @@ def register_exception_handlers(app: FastAPI, *, expose_internal_detail: bool) -
 
     @app.exception_handler(AppError)
     async def _app_error(request: Request, exc: AppError) -> JSONResponse:
+        headers = {"WWW-Authenticate": "Bearer"} if exc.http_status == 401 else None
         return JSONResponse(
             status_code=exc.http_status,
+            headers=headers,
             content=error_envelope(
                 exc,
                 request_id=_request_id(request),
@@ -329,6 +339,10 @@ def _http_error_code(http_status: int) -> ErrorCode:
     """
     if http_status == status.HTTP_404_NOT_FOUND:
         return ErrorCode.NOT_FOUND
+    if http_status == status.HTTP_401_UNAUTHORIZED:
+        return ErrorCode.UNAUTHENTICATED
+    if http_status == status.HTTP_403_FORBIDDEN:
+        return ErrorCode.FORBIDDEN
     if http_status == status.HTTP_405_METHOD_NOT_ALLOWED:
         return ErrorCode.INVALID_REQUEST
     if http_status == status.HTTP_413_CONTENT_TOO_LARGE:

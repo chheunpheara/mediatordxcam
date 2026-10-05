@@ -10,19 +10,46 @@ same shape as the real thing.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from app.core.config import Settings, get_settings
+from app.core.errors import AppError, ErrorCode
+from app.domain.auth import ALL_PERMISSIONS, Role, User, UserStatus
 from app.integrations.camdx.mock.ocr import MockOcrProvider
 from app.integrations.camdx.ocr import OcrProvider
 from app.services.artifacts import TempArtifactStore
+from app.services.auth import AuthService
 from app.services.documents import DocumentProcessor
 from app.services.face import FaceService
 from app.services.identity_registry import IdentityRegistry
 from app.services.kyc import KycService
 from app.services.local_ocr import LocalTesseractOcrProvider
+
+#: The session cookie set at login (D18). `HttpOnly`, so no browser script can
+#: read it — the frontend never references this name.
+SESSION_COOKIE = "camdx_session"
+
+#: The synthetic principal used while `AUTH_ENABLED=false` (the test suite and
+#: nothing else). It holds every permission and admin rights, so enforcement
+#: code runs the same shape of path with auth off instead of being skipped —
+#: and because tests force the flag off, the suite needs no credentials.
+_DEV_USER = User(
+    id="auth-disabled",
+    email="dev@localhost",
+    name="Auth disabled",
+    status=UserStatus.ACTIVE,
+    roles=(
+        Role(
+            id="auth-disabled",
+            name="All permissions",
+            is_admin=True,
+            permissions=ALL_PERMISSIONS,
+        ),
+    ),
+)
 
 
 def settings_provider() -> Settings:
@@ -125,3 +152,77 @@ def kyc_service_provider(
 
 
 KycServiceDep = Annotated[KycService, Depends(kyc_service_provider)]
+
+
+def auth_service_provider(request: Request, settings: SettingsDep) -> AuthService:
+    """The account service (D18), built once per application.
+
+    Cached on `app.state` so the store's schema check and seed run once rather
+    than per request, and so a test that builds its own app gets its own store.
+    Construction touches the database, so callers that run on the event loop
+    must wrap it in `asyncio.to_thread` (see `current_user` and `main.lifespan`).
+    """
+    cached: AuthService | None = getattr(request.app.state, "auth_service", None)
+    if cached is None:
+        cached = AuthService(settings)
+        request.app.state.auth_service = cached
+    return cached
+
+
+AuthServiceDep = Annotated[AuthService, Depends(auth_service_provider)]
+
+
+async def current_user(request: Request, settings: SettingsDep) -> User:
+    """The signed-in user behind this request (D18).
+
+    The whole API is gated: no valid session means `UNAUTHENTICATED`, and a
+    disabled account's sessions were revoked when it was disabled. With
+    `AUTH_ENABLED=false` this answers the all-permissions development user
+    instead — the flag exists for the test suite, never for a deployment.
+
+    The store is only touched when a token is actually presented, so an
+    anonymous request fails fast without constructing the account store.
+    """
+    if not settings.auth_enabled:
+        return _DEV_USER
+    token = extract_session_token(request)
+    if token is None:
+        raise AppError(ErrorCode.UNAUTHENTICATED)
+    service = await asyncio.to_thread(auth_service_provider, request, settings)
+    user = await service.resolve(token)
+    if user is None:
+        raise AppError(
+            ErrorCode.UNAUTHENTICATED,
+            message="Your session has expired. Please sign in again.",
+        )
+    return user
+
+
+CurrentUserDep = Annotated[User, Depends(current_user)]
+
+
+async def require_admin(user: CurrentUserDep) -> User:
+    """The signed-in user, when they hold admin rights (D18)."""
+    if not user.is_admin:
+        raise AppError(
+            ErrorCode.FORBIDDEN,
+            message="You need administrator access to manage accounts.",
+        )
+    return user
+
+
+AdminUserDep = Annotated[User, Depends(require_admin)]
+
+
+def extract_session_token(request: Request) -> str | None:
+    """The bearer token from the `Authorization` header or the session cookie.
+
+    Both are accepted: the browser relies on the `HttpOnly` cookie, while curl
+    and the backend tests send `Authorization: Bearer …`.
+    """
+    header = request.headers.get("Authorization")
+    if header:
+        scheme, _, value = header.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            return value.strip()
+    return request.cookies.get(SESSION_COOKIE)

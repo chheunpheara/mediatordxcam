@@ -38,6 +38,7 @@ from app.core.ids import REQUEST_ID_HEADER, new_request_id
 from app.core.logging import configure_logging, register_sensitive_values
 from app.infrastructure.db import init_database
 from app.services.artifacts import TempArtifactStore
+from app.services.auth import AuthService
 
 #: Every route below this prefix returns data derived from an identity document.
 #: Used to apply the no-store policy in one place rather than per endpoint.
@@ -107,6 +108,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ) from exc
         logger.info("identity registry ready", extra={"seeded_records": seeded})
 
+    if settings.auth_enabled:
+        # Build the account store once, at startup, so an unreachable DSN or an
+        # unwritable SQLite fallback aborts here rather than on the first
+        # sign-in attempt (fail fast, §21). Tests skip this: they force
+        # `AUTH_ENABLED=false`, which is also why none of them need a login.
+        try:
+            app.state.auth_service = await asyncio.to_thread(AuthService, settings)
+        except Exception as exc:
+            logger.exception("account store init failed")
+            raise ConfigurationError(
+                message=(
+                    "AUTH_ENABLED is true but the account store could not be "
+                    "reached. Start the database, or unset AUTH_ENABLED to run "
+                    "without sign-in (never in a shared environment)."
+                ),
+                code=ErrorCode.CONFIGURATION_ERROR,
+            ) from exc
+        logger.info("account store ready")
+
     store = TempArtifactStore(
         settings.temp_storage_dir,
         ttl_seconds=settings.temp_artifact_ttl_seconds,
@@ -162,15 +182,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved
 
-    # CORS: explicit allow-list only. Wildcards are rejected in production by
-    # `require_real_camdx_credentials`, and credentials are never allowed since
-    # the API is cookie- and token-free (§29, §30).
+    # CORS: explicit allow-list only; wildcards are rejected at startup.
+    # Credentials (the session cookie, D18) are allowed because the origins are
+    # enumerated — a wildcard origin plus credentials would let any site drive
+    # verified requests — and `Authorization` is accepted for bearer clients.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved.cors_origins,
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", REQUEST_ID_HEADER],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", REQUEST_ID_HEADER],
         expose_headers=[REQUEST_ID_HEADER],
         max_age=600,
     )

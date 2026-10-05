@@ -60,15 +60,150 @@ echoes it back so a user-visible error can be traced without exposing internals.
 | Code | Used for |
 |------|----------|
 | `200` | Success |
-| `400` | Malformed request (bad multipart, undecodable image) |
+| `201` | Resource created (account, role) |
+| `204` | Success with no body (logout, delete) |
+| `400` | Malformed request (bad multipart, undecodable image) or form refusal with `fieldErrors` |
+| `401` | No valid session (`UNAUTHENTICATED`); carries `WWW-Authenticate: Bearer` |
+| `403` | Signed in, but not permitted (`FORBIDDEN`) |
 | `404` | Unknown or expired artifact handle |
-| `409` | Illegal state transition (§33) |
+| `409` | Illegal state transition (§33): role still held, last administrator |
 | `413` | Upload exceeds size limit |
 | `415` | Unsupported media type |
 | `422` | Business validation failed — missing requirements, unreadable OCR |
 | `429` | Rate limited (Phase 10) |
 | `502` / `504` | Upstream CamDX failure, already translated to a safe message |
 | `500` | Unexpected fault — message is generic, detail goes to logs only |
+
+`401` and `403` are reserved for authentication and authorisation (§28). A
+request that is signed in and permitted but has the wrong *inputs* is still
+`422` or `400` — no business failure borrows an auth status, and no auth
+failure borrows a business code.
+
+---
+
+## Sign-in and administration · D18
+
+With `AUTH_ENABLED=true` (the default) every route requires a session, except:
+
+- `GET /health` and `GET /api/v1/health` — probes;
+- `/docs` and `/openapi.json` — the schema itself;
+- `POST /api/v1/auth/login` and `POST /api/v1/auth/logout`.
+
+`AUTH_ENABLED=false` opens the whole API for local exploration; it is what the
+backend test suite forces so that pre-authentication tests keep their meaning.
+It never weakens verification — only the gate around it.
+
+### Sessions
+
+Sign-in issues an opaque random token stored server-side with a 12-hour
+lifetime. A browser receives it twice, deliberately:
+
+| Where | Why |
+|-------|-----|
+| `camdx_session` cookie — `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` only in production | The SPA never reads it, so no script can steal it; `fetch` attaches it automatically (CORS runs with `allow_credentials`) |
+| `token` in the login response body | For curl, tests and any client that cannot keep a cookie jar |
+
+Nothing about the token is signed or self-contained. Logout deletes the row,
+disabling an account invalidates its sessions on the next request, and every
+call re-derives the user's permissions from the database — there is no claim a
+client could present to talk its way past a revoked session.
+
+### `POST /api/v1/auth/login` · public
+
+```json
+{ "email": "admin@gmail.com", "password": "P4ssw0rd!" }
+```
+
+**Response `200`** — sets the cookie and returns:
+
+```json
+{
+  "token": "hMq9…",
+  "user": {
+    "id": "usr_…",
+    "email": "admin@gmail.com",
+    "name": "Administrator",
+    "status": "active",
+    "roles": [{ "id": "rol_…", "name": "Admin" }],
+    "isAdmin": true
+  }
+}
+```
+
+Failure modes are deliberately coarse so the form cannot enumerate accounts
+(§30):
+
+| Case | HTTP | `code` | Message |
+|------|------|--------|---------|
+| Unknown email or wrong password — identical for both | `401` | `UNAUTHENTICATED` | That email or password is incorrect. |
+| Account disabled | `403` | `FORBIDDEN` | This account has been disabled. Please contact an administrator. |
+
+### `POST /api/v1/auth/logout` · session optional
+
+Deletes the session if one was presented and answers `204` either way —
+signing out twice, or after the session already expired, is not an error.
+
+### `GET /api/v1/auth/me` · authenticated
+
+The signed-in account, in the same shape as `user` above; `401` when there is
+no valid session. The SPA does not call it on load (the stored profile covers
+the first paint); it exists for clients and for debugging.
+
+### Permission enforcement
+
+| Endpoint | Behaviour |
+|----------|-----------|
+| Any admin route without an administrative role | `403 FORBIDDEN` before the handler runs |
+| `GET /api/v1/kyc/verification-methods` | Allowed for every signed-in user; methods outside the user's permissions come back `available: false` with `unavailableReason: "Your account does not have access to this verification method."` — all six stay visible (§9), only the run is withheld |
+| `POST /api/v1/kyc/verify` | Checked first: without the method's permission the answer is `403 FORBIDDEN` with that same sentence, before any input is examined |
+
+A permission is a verification-method id (`verify_user_info`, …), so the admin
+matrix, the method cards and the enforcement point share one vocabulary.
+
+### Password policy
+
+One sentence, wherever it is tripped:
+
+> Password must be at least 8 characters and include an upper-case letter, a lower-case letter, a number and a symbol.
+
+Length above 128 answers with its own message. Violations arrive as
+`fieldErrors.password` alongside a `400 INVALID_REQUEST`, so the admin form
+shows them inline.
+
+### Account administration · admin-only
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/v1/admin/permissions` | The six assignable permissions with their labels |
+| `GET` | `/api/v1/admin/users` | Every account with roles and status |
+| `POST` | `/api/v1/admin/users` | Create an account (`201`) |
+| `PATCH` | `/api/v1/admin/users/{id}` | Change name, roles, status or password; omitted fields stay unchanged |
+| `DELETE` | `/api/v1/admin/users/{id}` | Delete an account (`204`) |
+| `GET` | `/api/v1/admin/roles` | Every role with its permission keys |
+| `POST` | `/api/v1/admin/roles` | Create a role (`201`) |
+| `PATCH` | `/api/v1/admin/roles/{id}` | Rename or grant/remove administrator rights |
+| `PUT` | `/api/v1/admin/roles/{id}/permissions` | Replace the role's permission set wholesale |
+| `DELETE` | `/api/v1/admin/roles/{id}` | Delete a role nobody holds (`204`) |
+
+The guards live in `AuthService` and are tested there: you can never delete
+yourself, never remove the last active administrator's rights or account
+(`403`, `409`), never delete a role a user still holds (`409`), and duplicate
+emails or role names answer `400` with the failing field named.
+
+### Seeds
+
+A fresh database seeds idempotently by natural key (role name, admin email):
+
+| Role | Admin rights | Permissions |
+|------|--------------|-------------|
+| `Admin` | yes | all six |
+| `Senior Loan Officer` | yes | all six |
+| `Loan Officer` | no | `verify_user_info`, `verify_user_info_face` |
+
+plus the account `admin@gmail.com` / `P4ssw0rd!` holding `Admin` — a
+documented local placeholder (requirement 5); a deployment's first act is
+changing it. The auth tables live in the same database as everything else
+(`DATABASE_URL`), falling back to `var/auth.db` when no database is configured.
 
 ---
 

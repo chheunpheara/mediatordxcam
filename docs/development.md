@@ -147,9 +147,16 @@ the exception: they are consumed by the `postgres` service in compose, not by
 | `TEMP_ARTIFACT_TTL_SECONDS` | `900` | Biometric artefact lifetime |
 | `TEMP_SWEEP_INTERVAL_SECONDS` | `60` | Sweeper cadence |
 | `DATABASE_URL` | — | Identity-registry DSN (D13). Empty = fixture verification, no database needed |
+| `AUTH_ENABLED` | `true` | Gates every API route behind sign-in (D18). Set `false` only for local API exploration; the test suite forces it off. Auth tables use `DATABASE_URL`, falling back to `var/auth.db` when unset |
 
 In `CAMDX_MODE=real` the backend refuses to start if the required credentials are
 absent. It never silently falls back to mock (§21).
+
+On first start the auth store seeds idempotently: the roles `Admin`,
+`Senior Loan Officer` and `Loan Officer`, plus the account
+`admin@gmail.com` / `P4ssw0rd!` (requirement 5 — a documented placeholder; a
+deployment's first act is changing it). The login page is `http://localhost:3000/login`
+in Docker; sign-out and the `Administration` link live in the header.
 
 ---
 
