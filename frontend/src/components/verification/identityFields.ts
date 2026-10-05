@@ -14,7 +14,7 @@ export interface IdentityFormField {
   readonly label: string
   readonly hint?: string
   readonly required?: boolean
-  /** Render as a native date input (picker) when `date`. */
+  /** Render through the calendar datepicker (`DateInput`) when `date`. */
   readonly kind?: 'date'
 }
 

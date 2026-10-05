@@ -1,6 +1,7 @@
 import { useId, useMemo } from 'react'
 
 import type { IdentityResponse } from '../../lib/api'
+import { DateInput } from './DateInput'
 import { IDENTITY_FORM_FIELDS } from './identityFields'
 import { resolveIdentity } from '../../features/id-card-processing/IdentityDraftContext'
 import { useIdCardProcessing } from '../../features/id-card-processing/ProcessingContext'
@@ -76,17 +77,29 @@ export function IdentityForm({ ocr, hasDraft }: IdentityFormProps) {
                   {field.hint}
                 </p>
               ) : null}
-              <input
-                aria-describedby={wasMissing || empty ? hintId : undefined}
-                className="input mt-1 w-full"
-                id={inputId}
-                name={field.name}
-                onChange={(event) => setField(field.name, event.target.value)}
-                placeholder={field.hint}
-                required={field.required}
-                type={field.kind === 'date' ? 'date' : 'text'}
-                value={values[field.name]}
-              />
+              {field.kind === 'date' ? (
+                <DateInput
+                  ariaDescribedBy={wasMissing || empty ? hintId : undefined}
+                  id={inputId}
+                  name={field.name}
+                  onChange={(next) => setField(field.name, next)}
+                  placeholder={field.hint}
+                  required={field.required}
+                  value={values[field.name]}
+                />
+              ) : (
+                <input
+                  aria-describedby={wasMissing || empty ? hintId : undefined}
+                  className="input mt-1 w-full"
+                  id={inputId}
+                  name={field.name}
+                  onChange={(event) => setField(field.name, event.target.value)}
+                  placeholder={field.hint}
+                  required={field.required}
+                  type="text"
+                  value={values[field.name]}
+                />
+              )}
               {empty && field.required ? (
                 <p className="text-negative mt-1 text-xs">Please enter this information.</p>
               ) : wasMissing ? (

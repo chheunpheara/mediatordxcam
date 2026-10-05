@@ -110,9 +110,9 @@ def _normalise(name: str, value: str) -> str:
     """Canonical form of one field before comparison.
 
     Only what the data actually allows varies: whitespace everywhere, case for
-    Latin names, spelling for gender. Dates stay exact — both the form
-    (`<input type="date">`) and OCR produce `YYYY-MM-DD`, and a fuzzy date
-    match would be a comparison rule nobody asked for.
+    Latin names, spelling for gender. Dates stay exact — the form's datepicker
+    and OCR both produce `YYYY-MM-DD`, and a fuzzy date match would be a
+    comparison rule nobody asked for.
     """
     value = value.strip()
     if name in _CASE_INSENSITIVE_FIELDS:
