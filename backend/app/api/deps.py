@@ -25,6 +25,7 @@ from app.services.auth import AuthService
 from app.services.documents import DocumentProcessor
 from app.services.face import FaceService
 from app.services.identity_registry import IdentityRegistry
+from app.services.integrations import IntegrationService
 from app.services.kyc import KycService
 from app.services.local_ocr import LocalTesseractOcrProvider
 
@@ -226,3 +227,39 @@ def extract_session_token(request: Request) -> str | None:
         if scheme.lower() == "bearer" and value.strip():
             return value.strip()
     return request.cookies.get(SESSION_COOKIE)
+
+
+def integration_service_provider(request: Request, settings: SettingsDep) -> IntegrationService:
+    """The posting-settings service (D19), built once per application.
+
+    Cached on `app.state` like the account service; construction creates the
+    store's schema, so FastAPI runs this sync provider in a worker thread.
+    """
+    cached: IntegrationService | None = getattr(request.app.state, "integration_service", None)
+    if cached is None:
+        cached = IntegrationService(settings)
+        request.app.state.integration_service = cached
+    return cached
+
+
+IntegrationServiceDep = Annotated[IntegrationService, Depends(integration_service_provider)]
+
+
+async def require_core_post(user: CurrentUserDep) -> User:
+    """The signed-in user, when they hold the full permission set (D19).
+
+    "Post Settings" and "Post to Core Systems" are for Admin and Senior Loan
+    Officer — the two seeded roles that carry all six verification permissions.
+    Membership is checked as the permission set itself, not by role name, so a
+    custom role with the same reach qualifies and a renamed seed role still
+    works. Loan Officer (two permissions) is refused.
+    """
+    if not ALL_PERMISSIONS.issubset(user.permissions):
+        raise AppError(
+            ErrorCode.FORBIDDEN,
+            message="You need every verification permission to post to core systems.",
+        )
+    return user
+
+
+CorePostUserDep = Annotated[User, Depends(require_core_post)]
