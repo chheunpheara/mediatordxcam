@@ -43,7 +43,7 @@ import { clearSession } from '../lib/session'
  * (§9 requires all six to be visible).
  */
 export function IdCardPage() {
-  const { document, clear: clearDocument } = useDocumentSession()
+  const { document, restoring, clear: clearDocument } = useDocumentSession()
   const { state, result, error, process, draft, reset } = useIdCardProcessing()
   const faceCapture = useFaceCapture()
 
@@ -67,13 +67,24 @@ export function IdCardPage() {
       <main className="mx-auto w-full max-w-7xl p-4 sm:p-6">
         <h1 className="text-xl font-semibold">Verification workspace</h1>
         <div className="card mt-4 p-5" role="status">
-          <p className="text-sm font-semibold">No document selected</p>
-          <p className="text-ink-muted mt-1 text-sm">
-            Choose an ID Card image to begin verification.
-          </p>
-          <Link className="btn-primary mt-4" to={routes.landing}>
-            Go to upload
-          </Link>
+          {restoring ? (
+            <>
+              <p className="text-sm font-semibold">Restoring your session…</p>
+              <p className="text-ink-muted mt-1 text-sm">
+                Bringing back your uploaded document.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold">No document selected</p>
+              <p className="text-ink-muted mt-1 text-sm">
+                Choose an ID Card image to begin verification.
+              </p>
+              <Link className="btn-primary mt-4" to={routes.landing}>
+                Go to upload
+              </Link>
+            </>
+          )}
         </div>
       </main>
     )

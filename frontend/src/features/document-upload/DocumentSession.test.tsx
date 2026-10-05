@@ -1,4 +1,4 @@
-import { act, render, renderHook, screen } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect } from 'react'
@@ -6,6 +6,8 @@ import { useEffect } from 'react'
 import { DocumentSessionProvider } from './DocumentSessionProvider'
 import { useDocumentSession } from './DocumentSessionContext'
 import { ImagePreview } from './ImagePreview'
+import { hasStoredDocument, loadStoredDocument, saveStoredDocument } from '../../lib/documentStore'
+import { setSessionSlice } from '../../lib/session'
 
 const dimensions = { width: 1280, height: 800 }
 
@@ -94,6 +96,72 @@ describe('useDocumentSession', () => {
     unmount()
 
     expect(revoke).toHaveBeenCalledWith('blob:mock/1')
+  })
+})
+
+describe('refresh survival (D21)', () => {
+  it('restores the stored document on a fresh provider, as a refresh would', async () => {
+    const first = renderHook(() => useDocumentSession(), { wrapper: DocumentSessionProvider })
+    act(() => first.result.current.accept(makeFile(), dimensions))
+    await waitFor(() => expect(hasStoredDocument()).toBe(true))
+    first.unmount()
+
+    const { result } = renderHook(() => useDocumentSession(), { wrapper: DocumentSessionProvider })
+
+    // First paint reports the pending restore instead of claiming emptiness.
+    expect(result.current.restoring).toBe(true)
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    expect(result.current.document?.file.name).toBe('card.jpg')
+    expect(result.current.document?.dimensions).toEqual(dimensions)
+    expect(result.current.document?.previewUrl).toMatch(/^data:image\/jpeg;base64,/)
+  })
+
+  it('an accept during a restore wins over the stored copy', async () => {
+    await saveStoredDocument({
+      fileName: 'old.jpg',
+      type: 'image/jpeg',
+      width: 1280,
+      height: 800,
+      dataUrl: 'data:image/jpeg;base64,eA==',
+    })
+
+    const { result } = renderHook(() => useDocumentSession(), { wrapper: DocumentSessionProvider })
+    expect(result.current.restoring).toBe(true)
+
+    act(() => result.current.accept(makeFile('new.jpg'), dimensions))
+
+    await waitFor(() => expect(result.current.document?.file.name).toBe('new.jpg'))
+    expect(result.current.restoring).toBe(false)
+    await waitFor(async () => {
+      expect(await loadStoredDocument()).toMatchObject({ fileName: 'new.jpg' })
+    })
+  })
+
+  it('a stale marker without a copy heals to the empty state', async () => {
+    setSessionSlice('docStored', true)
+
+    const { result } = renderHook(() => useDocumentSession(), { wrapper: DocumentSessionProvider })
+    expect(result.current.restoring).toBe(true)
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    expect(result.current.document).toBeNull()
+    expect(hasStoredDocument()).toBe(false)
+  })
+
+  it('clearing discards the stored copy too', async () => {
+    const first = renderHook(() => useDocumentSession(), { wrapper: DocumentSessionProvider })
+    act(() => first.result.current.accept(makeFile(), dimensions))
+    await waitFor(() => expect(hasStoredDocument()).toBe(true))
+
+    act(() => first.result.current.clear())
+    await waitFor(() => expect(hasStoredDocument()).toBe(false))
+    first.unmount()
+
+    const { result } = renderHook(() => useDocumentSession(), { wrapper: DocumentSessionProvider })
+    expect(result.current.restoring).toBe(false)
+    expect(result.current.document).toBeNull()
   })
 })
 

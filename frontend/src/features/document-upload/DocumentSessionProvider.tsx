@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DocumentSessionContext } from './DocumentSessionContext'
 import type { DocumentSessionValue, UploadedDocument } from './DocumentSessionContext'
 import type { ImageDimensions } from './validation'
-import { clearSessionSlice, dataUrlToFile, readSession, setSessionSlice } from '../../lib/session'
+import { dataUrlToFile } from '../../lib/session'
+import {
+  clearStoredDocument,
+  hasStoredDocument,
+  loadStoredDocument,
+  saveStoredDocument,
+} from '../../lib/documentStore'
 
 /**
  * Holds the selected document for the whole session, above the router.
@@ -12,25 +18,16 @@ import { clearSessionSlice, dataUrlToFile, readSession, setSessionSlice } from '
  * workspace on `/id-card` are two views of one selection, and Phase 3 POSTs the
  * file from the second page.
  *
- * The bytes are mirrored to `sessionStorage` so a refresh on `/id-card`
- * rehydrates instead of resetting the workspace; only an explicit back-to-upload
- * clears that slice.
+ * The bytes are mirrored to IndexedDB so a refresh on `/id-card` rehydrates
+ * instead of resetting the workspace (D21); `sessionStorage` only carries the
+ * marker that a copy is waiting, because its ~5 MB quota cannot hold the 10 MB
+ * uploads validation allows. First paint reports `restoring` while that copy is
+ * read, so the workspace can say "restoring" instead of "no document selected",
+ * and only an explicit back-to-upload clears it.
  */
 export function DocumentSessionProvider({ children }: { children: React.ReactNode }) {
-  const [document, setDocument] = useState<UploadedDocument | null>(() => {
-    const stored = readSession()?.doc
-    if (!stored) return null
-    try {
-      const file = dataUrlToFile(stored.dataUrl, stored.fileName, stored.type)
-      return {
-        file,
-        dimensions: { width: stored.width, height: stored.height },
-        previewUrl: stored.dataUrl,
-      }
-    } catch {
-      return null
-    }
-  })
+  const [document, setDocument] = useState<UploadedDocument | null>(null)
+  const [restoring, setRestoring] = useState(hasStoredDocument)
 
   /**
    * The live object URL lives in a ref, not in state. Revoking "the previous one"
@@ -46,6 +43,34 @@ export function DocumentSessionProvider({ children }: { children: React.ReactNod
     }
   }, [])
 
+  // Read the stored copy back. accept() and clear() both drop `restoring`
+  // first, and that state change cancels this effect — a restore in flight
+  // loses to an explicit user action rather than overwriting it.
+  useEffect(() => {
+    if (!restoring) return
+    let active = true
+    void loadStoredDocument().then((stored) => {
+      if (!active) return
+      setRestoring(false)
+      if (!stored) return
+      try {
+        setDocument({
+          file: dataUrlToFile(stored.dataUrl, stored.fileName, stored.type),
+          dimensions: { width: stored.width, height: stored.height },
+          // Object URLs do not survive a refresh; the stored data URL is the
+          // preview for a restored entry, as it was when the bytes were read.
+          previewUrl: stored.dataUrl,
+        })
+      } catch {
+        // An undecodable record counts as no record; the save effect below
+        // then clears it, so the session heals to the empty state.
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [restoring])
+
   const accept = useCallback(
     (file: File, dimensions: ImageDimensions) => {
       // Revoke before replacing, or the old blob stays resident for the rest of
@@ -53,6 +78,7 @@ export function DocumentSessionProvider({ children }: { children: React.ReactNod
       releasePreviewUrl()
       const previewUrl = URL.createObjectURL(file)
       previewUrlRef.current = previewUrl
+      setRestoring(false)
       setDocument({ file, dimensions, previewUrl })
     },
     [releasePreviewUrl],
@@ -60,25 +86,27 @@ export function DocumentSessionProvider({ children }: { children: React.ReactNod
 
   const clear = useCallback(() => {
     releasePreviewUrl()
+    setRestoring(false)
     setDocument(null)
   }, [releasePreviewUrl])
 
   // Unmounting with a URL outstanding leaks the blob, so release on the way out.
   useEffect(() => releasePreviewUrl, [releasePreviewUrl])
 
-  // Persistence: carry the file bytes in sessionStorage so `/id-card`
-  // survives a refresh. Object URLs are not storable, so we re-read the file
-  // here; the rehydrated entry uses the same `previewUrl`.
+  // Persistence: mirror the file bytes to IndexedDB so `/id-card` survives a
+  // refresh (D21). Object URLs are not storable, so we re-read the file here;
+  // skipped while a restore is in flight, whose own copy is already stored.
   useEffect(() => {
+    if (restoring) return
     if (!document) {
-      clearSessionSlice('doc')
+      void clearStoredDocument()
       return
     }
     let active = true
     const reader = new FileReader()
     reader.onload = () => {
       if (!active || typeof reader.result !== 'string') return
-      setSessionSlice('doc', {
+      void saveStoredDocument({
         fileName: document.file.name,
         type: document.file.type,
         width: document.dimensions.width,
@@ -99,11 +127,11 @@ export function DocumentSessionProvider({ children }: { children: React.ReactNod
         // ignore
       }
     }
-  }, [document])
+  }, [document, restoring])
 
   const value = useMemo<DocumentSessionValue>(
-    () => ({ document, accept, clear }),
-    [document, accept, clear],
+    () => ({ document, restoring, accept, clear }),
+    [document, restoring, accept, clear],
   )
 
   return <DocumentSessionContext value={value}>{children}</DocumentSessionContext>

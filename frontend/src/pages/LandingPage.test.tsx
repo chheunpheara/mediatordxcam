@@ -8,6 +8,7 @@ import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { AppRoutes } from '@/app/AppRoutes'
 import { MAX_FILE_SIZE_BYTES, MESSAGES } from '@/features/document-upload/validation'
+import { saveStoredDocument } from '@/lib/documentStore'
 import { stubFailingFetch, stubProcessingFetch } from '@/test/fixtures'
 
 /**
@@ -227,5 +228,31 @@ describe('workspace without a document', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent(/no document selected/i)
     expect(screen.getByRole('link', { name: /go to upload/i })).toHaveAttribute('href', '/')
+  })
+})
+
+describe('refresh survival (D21)', () => {
+  it('brings back a stored document instead of the dropzone', async () => {
+    await saveStoredDocument({
+      fileName: 'card.jpg',
+      type: 'image/jpeg',
+      width: 1280,
+      height: 800,
+      dataUrl: 'data:image/jpeg;base64,eA==',
+    })
+
+    renderLanding()
+
+    // While the copy is on its way back, the dropzone is withheld so a second
+    // pick cannot race the restore.
+    expect(screen.getByRole('status')).toHaveTextContent(/restoring your selection/i)
+    expect(screen.queryByLabelText(/choose an id card image/i)).not.toBeInTheDocument()
+
+    const image = await screen.findByRole('img')
+    expect(image).toHaveAccessibleName(/card\.jpg/)
+    expect(screen.queryByLabelText(/choose an id card image/i)).not.toBeInTheDocument()
+    expect(
+      await screen.findByRole('button', { name: /continue to verification/i }),
+    ).toBeInTheDocument()
   })
 })

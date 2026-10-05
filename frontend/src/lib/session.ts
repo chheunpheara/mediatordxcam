@@ -3,14 +3,6 @@ import type { ProcessingState } from '../features/id-card-processing/ProcessingC
 import type { IdentityDraft } from '../features/id-card-processing/IdentityDraftContext'
 import type { FaceStatus } from '../lib/api'
 
-export interface StoredDoc {
-  readonly fileName: string
-  readonly type: string
-  readonly width: number
-  readonly height: number
-  readonly dataUrl: string
-}
-
 export interface StoredProcessing {
   readonly state: ProcessingState
   readonly result: ProcessIdCardResponse | null
@@ -27,7 +19,8 @@ export interface StoredFace {
 }
 
 export interface Session {
-  doc?: StoredDoc
+  /** A copy of the document waits in the IndexedDB store (D21); its bytes never come back here. */
+  docStored?: boolean
   processing?: StoredProcessing
   face?: StoredFace
 }
@@ -38,7 +31,11 @@ export function readSession(): Session | null {
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    return JSON.parse(raw) as Session
+    const session = JSON.parse(raw) as Session & { doc?: unknown }
+    // Pre-D21 payloads carried the file bytes in this slice, against a quota
+    // they could not fit. Drop them on read so they leave with the next write.
+    delete session.doc
+    return session
   } catch {
     return null
   }

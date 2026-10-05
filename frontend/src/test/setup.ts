@@ -1,9 +1,11 @@
 import '@testing-library/jest-dom/vitest'
+import 'fake-indexeddb/auto'
 
 import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach } from 'vitest'
 
 import { clearAuthUser, writeAuthUser } from '@/lib/auth'
+import { resetDocumentStore } from '@/lib/documentStore'
 import { TEST_AUTH_USER } from './fixtures'
 
 /**
@@ -15,8 +17,11 @@ import { TEST_AUTH_USER } from './fixtures'
  * a provider — also matches how the guard decides: it falls back to reading
  * this same stored profile, which is what production does on first paint.
  */
-beforeEach(() => {
+beforeEach(async () => {
   writeAuthUser(TEST_AUTH_USER)
+  // A document stored by an earlier test must not make this one start as
+  // "restoring" (D21): unlike sessionStorage, the IndexedDB store is shared.
+  await resetDocumentStore()
 })
 
 afterEach(() => {

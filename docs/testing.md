@@ -173,6 +173,7 @@ layout change cannot quietly drop a requirement:
 | export defaults to all columns (D17) | untouched dialog downloads every column in all three formats; deselecting drops exactly that key; disabled with none left |
 | posting gate + write-only passwords (D19) | Loan Officer receives 403 on every integrations route and sees no Post buttons; settings responses never contain a stored password; a blank password on save keeps the stored one (checked against the store); a refused save leaves the list untouched |
 | calendar datepicker keeps the typing contract (D20) | the labelled control still holds ISO under `fireEvent.change`; letters never reach the form; a partial or impossible date clears on blur; picking a day writes `YYYY-MM-DD` and returns focus; Escape and an outside click close the calendar, which anchors to the value and marks today |
+| refresh keeps the document and the captured face (D21) | a seeded stored document plus the `processing` and `face` slices rehydrate into the workspace with the card preview, the identity fields and the captured face visible and no second `id-card/process` call; a stale marker with no stored copy falls back to "No document selected" without fetching; clearing the selection removes the stored copy |
 | §16 unread field | empty input plus "Please enter this information." |
 
 ### Why the face tests do not use a photograph

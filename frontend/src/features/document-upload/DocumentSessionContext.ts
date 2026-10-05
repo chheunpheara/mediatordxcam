@@ -24,6 +24,8 @@ export interface UploadedDocument {
 
 export interface DocumentSessionValue {
   readonly document: UploadedDocument | null
+  /** True while the stored copy (D21) is being read back after a refresh. */
+  readonly restoring: boolean
   readonly accept: (file: File, dimensions: ImageDimensions) => void
   readonly clear: () => void
 }

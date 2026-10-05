@@ -24,7 +24,7 @@ import { useIdCardProcessing } from '../features/id-card-processing/ProcessingCo
  */
 export function LandingPage() {
   const navigate = useNavigate()
-  const { document, accept, clear } = useDocumentSession()
+  const { document, restoring, accept, clear } = useDocumentSession()
   const { state, error: processingError, process, reset } = useIdCardProcessing()
   const faceCapture = useFaceCapture()
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -81,6 +81,18 @@ export function LandingPage() {
         <div className="mt-8">
           {document ? (
             <ImagePreview document={document} onClear={handleClear} />
+          ) : restoring ? (
+            // A stored copy is on its way back (D21); hold the dropzone until it
+            // lands, so a second pick cannot race the restore.
+            <div
+              className="border-border bg-surface-sunken rounded-xl border-2 border-dashed p-8 text-center"
+              role="status"
+            >
+              <p className="text-sm font-semibold">Restoring your selection…</p>
+              <p className="text-ink-muted mt-1 text-sm">
+                Bringing back your uploaded document.
+              </p>
+            </div>
           ) : (
             <Dropzone
               onSelect={(file) => void handleSelect(file)}

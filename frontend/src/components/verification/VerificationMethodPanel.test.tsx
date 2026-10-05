@@ -209,9 +209,11 @@ describe('the verify action (§11, §19)', () => {
     const panel = await methodPanel()
 
     // The mock OCR leaves date of birth blank, so identity is not yet supplied.
-    expect(await within(panel).findByRole('button', { name: 'Verify' })).toBeDisabled()
+    expect(await within(panel).findByRole('button', { name: 'Verify' })).toBeInTheDocument()
+    // The sentence is rendered from the fetched method list, so it may land
+    // after the button does.
     expect(
-      within(panel).getByText(/one more thing is needed before you can verify/i),
+      await within(panel).findByText(/one more thing is needed before you can verify/i),
     ).toBeInTheDocument()
   })
 

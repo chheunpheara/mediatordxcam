@@ -9,6 +9,8 @@ import { DocumentSessionProvider } from '@/features/document-upload/DocumentSess
 import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { makeProcessingResult, stubProcessingFetch, urlOf } from '@/test/fixtures'
+import { saveStoredDocument } from '@/lib/documentStore'
+import { setSessionSlice } from '@/lib/session'
 import type { FaceExtraction, ProcessIdCardResponse } from '@/lib/api'
 
 /**
@@ -380,6 +382,59 @@ describe('workspace behaviour', () => {
 
     await waitFor(() => expect(processCalls(fetchMock)).toHaveLength(2))
     expect(await screen.findByLabelText(/^National ID/)).toHaveValue('123456789')
+  })
+})
+
+describe('refresh survival (D21)', () => {
+  it('restores the uploaded document and the captured face after a refresh', async () => {
+    const result = makeProcessingResult()
+    const fetchMock = stubProcessingFetch(result)
+    // What a refresh leaves behind: the document in the store (D21) plus the
+    // two small slices sessionStorage has always been able to hold.
+    await saveStoredDocument({
+      fileName: 'card.jpg',
+      type: 'image/jpeg',
+      width: 1280,
+      height: 800,
+      dataUrl: 'data:image/jpeg;base64,eA==',
+    })
+    setSessionSlice('processing', { state: 'ready', result, draft: {}, error: null })
+    setSessionSlice('face', {
+      state: 'ready',
+      faceRef: 'art_99999999999999999999999999999999',
+      captureStatus: 'detected',
+      ownedBy: result.documentRef,
+      error: null,
+    })
+
+    renderAt('/id-card')
+
+    // The workspace comes back from the stored copy — no re-upload, no reprocess.
+    expect(
+      await screen.findByRole('heading', { name: 'Verification workspace', level: 1 }),
+    ).toBeInTheDocument()
+    expect(await screen.findByText('card.jpg')).toBeInTheDocument()
+    expect(screen.queryByText(/no document selected/i)).not.toBeInTheDocument()
+    expect(await screen.findByLabelText(/^National ID/)).toHaveValue('123456789')
+
+    // Column 1 still shows the document from the earlier run's artefact…
+    const preview = await screen.findByAltText(/original id card uploaded as card\.jpg/i)
+    expect(preview).toHaveAttribute('src', `/api/v1/kyc/artifacts/${result.documentRef}`)
+
+    // …and the method list loads from its own endpoint without the document
+    // being processed a second time.
+    const select = await screen.findByRole('combobox', { name: /verification method/i })
+    expect(processCalls(fetchMock)).toHaveLength(0)
+
+    // The captured face is still offered to a method that needs it.
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.selectOptions(select, 'verify_user_info_face')
+
+    const face = await screen.findByAltText(/captured current face/i)
+    expect(face).toHaveAttribute(
+      'src',
+      '/api/v1/kyc/artifacts/art_99999999999999999999999999999999',
+    )
   })
 })
 describe('export (D17)', () => {
