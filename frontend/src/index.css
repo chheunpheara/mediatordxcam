@@ -105,3 +105,22 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/*
+ * Calendar (react-day-picker, D20): brand-tinted selection and hover on top of
+ * the library stylesheet that `DateInput` loads. Each rule touches properties
+ * the library leaves unset (or sets to the same brand value), so the cascade
+ * order between the two files never matters.
+ */
+.rdp-selected .rdp-day_button {
+  @apply border-brand bg-brand font-semibold text-white;
+}
+
+.rdp-day:not(.rdp-selected) .rdp-day_button:hover:not(:disabled) {
+  @apply bg-brand-soft;
+}
+
+.rdp-button_previous:hover .rdp-chevron,
+.rdp-button_next:hover .rdp-chevron {
+  fill: var(--color-brand-hover);
+}

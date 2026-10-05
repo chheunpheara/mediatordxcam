@@ -9,8 +9,9 @@ import { DateInput } from './DateInput'
  *
  * The contract that matters: the labelled control still holds `YYYY-MM-DD`
  * for the draft (typing and `fireEvent.change` keep working exactly as the
- * native input did), the calendar replaces only the platform picker, and a
- * partial or lettered entry can never masquerade as a filled required field.
+ * native input did), the react-day-picker calendar replaces only the platform
+ * picker, and a partial or lettered entry can never masquerade as a filled
+ * required field.
  */
 
 const MONTHS = [
@@ -67,8 +68,9 @@ describe('DateInput', () => {
     const dialog = openCalendar()
 
     expect(dialog).toHaveTextContent('February 1994')
-    const selected = within(dialog).getByRole('button', { name: 'February 11, 1994' })
-    expect(selected).toHaveAttribute('aria-pressed', 'true')
+    const selected = within(dialog).getByRole('button', { name: /February 11th, 1994/ })
+    expect(selected).toHaveAccessibleName('Friday, February 11th, 1994, selected')
+    expect(selected.closest('td')).toHaveAttribute('aria-selected', 'true')
     expect(document.activeElement).toBe(selected)
     expect(screen.getByRole('button', { name: 'Open calendar' })).toHaveAttribute(
       'aria-expanded',
@@ -80,7 +82,7 @@ describe('DateInput', () => {
     render(<Harness initial="1994-02-11" />)
     const dialog = openCalendar()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'February 15, 1994' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /February 15th, 1994/ }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     const input = screen.getByLabelText(/^Date of Birth/)
@@ -96,11 +98,11 @@ describe('DateInput', () => {
     render(<Harness initial="1994-02-11" />)
     openCalendar()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next month' }))
+    fireEvent.click(screen.getByRole('button', { name: /next month/i }))
     expect(screen.getByRole('dialog')).toHaveTextContent('March 1994')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }))
+    fireEvent.click(screen.getByRole('button', { name: /previous month/i }))
+    fireEvent.click(screen.getByRole('button', { name: /previous month/i }))
     expect(screen.getByRole('dialog')).toHaveTextContent('January 1994')
   })
 
@@ -109,7 +111,7 @@ describe('DateInput', () => {
     openCalendar()
 
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
-    expect(document.activeElement).toHaveAttribute('aria-label', 'February 12, 1994')
+    expect(document.activeElement).toHaveAccessibleName(/Saturday, February 12th, 1994/)
 
     // 12 → 19 → 26 → March 5 (February 1994 has 28 days).
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
@@ -117,7 +119,7 @@ describe('DateInput', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
 
     expect(screen.getByRole('dialog')).toHaveTextContent('March 1994')
-    expect(document.activeElement).toHaveAttribute('aria-label', 'March 5, 1994')
+    expect(document.activeElement).toHaveAccessibleName(/March 5th, 1994/)
   })
 
   it('closes on Escape and gives focus back to the input', () => {
@@ -152,10 +154,13 @@ describe('DateInput', () => {
     const monthTitle = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`
     expect(dialog).toHaveTextContent(monthTitle)
 
-    const today = within(dialog).getByRole('button', {
-      name: `${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`,
-    })
-    expect(today).toHaveAttribute('aria-current', 'date')
+    const today = within(dialog).getByRole('button', { name: /^Today,/ })
+    expect(today).toHaveAccessibleName(
+      expect.stringMatching(
+        `^Today, .*${MONTHS[now.getMonth()]} ${now.getDate()}(st|nd|rd|th), ${now.getFullYear()}$`,
+      ),
+    )
+    expect(today.closest('td')).toHaveAttribute('data-today')
     expect(document.activeElement).toBe(today)
   })
 
