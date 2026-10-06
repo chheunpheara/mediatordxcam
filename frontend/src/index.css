@@ -201,3 +201,144 @@
   font-size: 0.8125rem;
   color: var(--color-ink);
 }
+
+/*
+ * The welcome screen's liveness art: the stage above with nothing in it yet.
+ * The oval, guide and stroke values are deliberately the same as
+ * `.liveness-stage`, so the picture the camera later fills lands exactly on
+ * the frame the customer has been looking at. Decorative only — the greeting
+ * it replaced is the `role="img"` label, and motion stops under
+ * `prefers-reduced-motion` (§32).
+ */
+.liveness-art {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 3 / 4;
+  width: min(78vw, 22rem);
+  margin-inline: auto;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 55% 50% at 50% 46%, var(--color-brand-soft), transparent 78%),
+    var(--color-surface-raised);
+}
+
+.liveness-art__guide {
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  left: 12%;
+  right: 12%;
+  border: 3px solid var(--color-brand-deep);
+  border-radius: 50%;
+}
+
+.liveness-art__glow {
+  position: absolute;
+  inset: 20% 24%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, var(--color-brand-soft), transparent 72%);
+  opacity: 0.6;
+  animation: liveness-art-breathe 3.6s ease-in-out infinite;
+}
+
+.liveness-art__ring {
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  left: 12%;
+  right: 12%;
+  border: 2px solid var(--color-brand);
+  border-radius: 50%;
+  opacity: 0;
+  animation: liveness-art-ripple 4.4s ease-out infinite;
+}
+
+.liveness-art__ring--late {
+  animation-delay: 2.2s;
+}
+
+.liveness-art__scan {
+  position: absolute;
+  right: 18%;
+  left: 18%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--color-brand), transparent);
+  opacity: 0;
+  animation: liveness-art-scan 4.4s ease-in-out infinite;
+}
+
+@keyframes liveness-art-ripple {
+  0% {
+    transform: scale(0.72);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.45;
+  }
+  70% {
+    opacity: 0.18;
+  }
+  100% {
+    transform: scale(1.04);
+    opacity: 0;
+  }
+}
+
+@keyframes liveness-art-breathe {
+  0%,
+  100% {
+    transform: scale(0.97);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 0.85;
+  }
+}
+
+@keyframes liveness-art-scan {
+  0% {
+    top: 20%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.7;
+  }
+  84% {
+    opacity: 0.7;
+  }
+  100% {
+    top: 80%;
+    opacity: 0;
+  }
+}
+
+/* One frozen composition: the rings sit at two depths, the sweep parks in the
+   middle, and nothing moves (§32). */
+@media (prefers-reduced-motion: reduce) {
+  .liveness-art__ring,
+  .liveness-art__glow,
+  .liveness-art__scan {
+    animation: none;
+  }
+
+  .liveness-art__ring {
+    opacity: 0.35;
+    transform: scale(0.88);
+  }
+
+  .liveness-art__ring--late {
+    opacity: 0.18;
+    transform: scale(1);
+  }
+
+  .liveness-art__glow {
+    opacity: 0.7;
+  }
+
+  .liveness-art__scan {
+    top: 50%;
+    opacity: 0.45;
+  }
+}

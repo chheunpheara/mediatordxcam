@@ -116,11 +116,12 @@ describe('CustomerDisplayPage', () => {
     Reflect.deleteProperty(navigator, 'mediaDevices')
   })
 
-  it('shows the welcome screen by default, with nothing to tap', async () => {
+  it('shows the welcome art by default, with nothing to tap', async () => {
     openOnboardingSocket.mockReturnValue({ send: vi.fn(), close: vi.fn() })
     renderAt('/display?session=abc')
 
-    expect(await screen.findByText('Welcome')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Welcome' })).toBeInTheDocument()
+    expect(screen.queryByText(/thank you/i)).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -143,6 +144,8 @@ describe('CustomerDisplayPage', () => {
     expect(
       await screen.findByText('Hold still — the teller will start the check.'),
     ).toBeInTheDocument()
+    // The idle art is what the oval replaced, so it cannot still be on screen.
+    expect(screen.queryByRole('img', { name: 'Welcome' })).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -198,7 +201,7 @@ describe('CustomerDisplayPage', () => {
 
     story.h?.({ type: 'cancelSession' })
 
-    expect(await screen.findByText('Welcome')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Welcome' })).toBeInTheDocument()
     expect(camera.stopTrack).toHaveBeenCalled()
     expect(screen.queryByRole('button')).toBeNull()
   })

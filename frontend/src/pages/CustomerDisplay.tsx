@@ -4,13 +4,16 @@ import { useSearchParams } from 'react-router-dom'
 import { openOnboardingSocket } from '../features/onboarding/onboardingSocket'
 import type { CustomerUiState, OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
 import { pickMimeType } from '../features/liveness/mimeTypes'
+import { LivenessArt } from '../components/liveness/LivenessArt'
 
 /**
  * Screen B (the customer-facing Address 1 monitor).
  *
- * Default is a calm, static welcome screen, camera closed. The teller's
- * `activateLiveness` opens the webcam — the customer taps nothing: the only
- * input this screen takes is the operating system's own permission prompt.
+ * Default is the idle liveness art — the oval the camera will later fill,
+ * breathing in the middle of the screen — with the camera closed. The
+ * teller's `activateLiveness` opens the webcam — the customer taps nothing:
+ * the only input this screen takes is the operating system's own permission
+ * prompt.
  * Once live, frames stream to the teller tab at ~12 fps.
  *
  * When the teller dispatches `startRecording`, this tab records a 3-second
@@ -345,10 +348,7 @@ export function CustomerDisplayPage() {
       className="bg-white text-ink flex min-h-screen flex-col items-center justify-center p-3 text-center"
     >
       {screenState === 'welcome' ? (
-        <section aria-live="polite">
-          <h1 className="text-5xl font-semibold tracking-tight">Welcome</h1>
-          <p className="mt-4 text-2xl opacity-80">and Thank You for Your Support</p>
-        </section>
+        <LivenessArt />
       ) : (
         <section className="w-full max-w-xl">
           <div className="liveness-stage">
