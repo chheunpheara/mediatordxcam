@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.domain.models import IdentityData
 from app.services.local_ocr import LocalTesseractOcrProvider
 
 #: Lines as Tesseract returned them for a real card upload (trimmed to the
@@ -108,3 +109,92 @@ def test_birth_candidate_still_earliest_when_named_months_present(
     provider: LocalTesseractOcrProvider,
 ) -> None:
     assert provider._birth_candidate("15 JAN 2032\n05 DEC 1988\n15 JAN 2022") == "1988-12-05"
+
+
+def test_the_name_line_splits_into_given_and_family_per_the_card_style(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    """The card prints `ឈ្មោះ/Name <given> <family>` as one run (D24).
+
+    The family label never OCRs on this card, so the line's own order — the
+    same one the Latin line beneath prints — is what separates the two names,
+    and the digit noise in the run must not reach either slot.
+    """
+    data = provider._parse_id_card("ឈ្មោះ//ខកា6 ភាររីន ឈីន\nPHEARAEUN CHHEUN")
+
+    assert data.first_name_khmer == "ភាររីន"
+    assert data.last_name_khmer == "ឈីន"
+
+
+def test_a_single_khmer_word_cannot_fill_both_name_slots(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    """One surviving word could be either half — leave both for the user (§16)."""
+    assert provider._split_khmer_name("ឈ្មោះ///ឧ76 ភាររីន ais") == (None, None)
+
+
+def test_no_name_line_yields_no_khmer_names(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    assert provider._split_khmer_name("KHMER NATIONAL IDENTITY CARD") == (None, None)
+
+
+def test_a_complete_nlp_pair_wins_over_the_rule_read(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    """The analysis of the whole Name line is the answer the rule could not give."""
+    rule = IdentityData(first_name_khmer="ភាររីន", last_name_khmer="ឈីន")
+    nlp = IdentityData(first_name_khmer="ចម", last_name_khmer="សុខ")
+
+    merged = provider._merge_rule_with_nlp(rule, nlp)
+
+    assert (merged.first_name_khmer, merged.last_name_khmer) == ("ចម", "សុខ")
+
+
+def test_nlp_echoing_ocr_noise_does_not_reach_a_name_slot(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    """An analysis repeating the row's noise is not an answer; the rule stands."""
+    rule = IdentityData(first_name_khmer="ភាររីន", last_name_khmer="ឈីន")
+    nlp = IdentityData(first_name_khmer="ឧ76", last_name_khmer="ភាររីន")
+
+    merged = provider._merge_rule_with_nlp(rule, nlp)
+
+    assert (merged.first_name_khmer, merged.last_name_khmer) == ("ភាររីន", "ឈីន")
+
+
+def test_the_rule_pair_survives_without_nlp(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    rule = IdentityData(first_name_khmer="សុខា", last_name_khmer="ចម")
+
+    merged = provider._merge_rule_with_nlp(rule, None)
+
+    assert (merged.first_name_khmer, merged.last_name_khmer) == ("សុខា", "ចម")
+
+
+def test_low_confidence_words_mark_the_field_for_verification(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    identity = IdentityData(first_name_khmer="ភាររីន", last_name_khmer="ឈីន")
+    words = [("ភាររីន", 89), ("ឈីន", 26), ("PHEARAEUN", 92)]
+
+    assert provider._unclear_fields(identity, words) == ("lastNameKhmer",)
+
+
+def test_a_field_the_data_pass_never_saw_is_not_blamed(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    """A normalised ISO date has no word of its own to report a confidence for."""
+    identity = IdentityData(date_of_birth="1988-12-05")
+    words = [("05", 96), ("DEC", 96), ("1988", 19)]
+
+    assert provider._unclear_fields(identity, words) == ()
+
+
+def test_no_confidences_means_nothing_is_marked_unclear(
+    provider: LocalTesseractOcrProvider,
+) -> None:
+    identity = IdentityData(last_name_khmer="ឈីន")
+
+    assert provider._unclear_fields(identity, []) == ()

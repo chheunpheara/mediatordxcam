@@ -234,5 +234,6 @@ function recordOcr(record: UploadedRecord): IdentityResponse {
     documentType: null,
     fields: record.values,
     missingFields: IDENTITY_FIELDS.filter((name) => (record.values[name] ?? '').trim() === ''),
+    unclearFields: [],
   }
 }

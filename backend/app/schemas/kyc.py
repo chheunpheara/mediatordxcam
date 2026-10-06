@@ -49,6 +49,10 @@ class IdentityResponse(ApiModel):
         default_factory=list,
         description="Fields OCR could not read; the UI prompts for these (§16).",
     )
+    unclearFields: list[str] = Field(
+        default_factory=list,
+        description="Read at a low word confidence; the UI asks the user to verify these (D24).",
+    )
 
 
 class FaceBoxResponse(ApiModel):

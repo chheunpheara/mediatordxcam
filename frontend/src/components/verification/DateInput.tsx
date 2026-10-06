@@ -46,11 +46,14 @@ export interface DateInputProps {
   readonly required?: boolean | undefined
   readonly placeholder?: string | undefined
   readonly ariaDescribedBy?: string | undefined
+  /** Extra classes for the input itself (e.g. the D24 unclear tint). */
+  readonly className?: string | undefined
   readonly onChange: (value: string) => void
 }
 
 export function DateInput({
   ariaDescribedBy,
+  className,
   id,
   name,
   onChange,
@@ -110,7 +113,7 @@ export function DateInput({
     <div className="relative mt-1" onKeyDown={handleKeyDown} ref={rootRef}>
       <input
         aria-describedby={ariaDescribedBy}
-        className="input pr-10"
+        className={`input pr-10${className ? ` ${className}` : ''}`}
         id={id}
         name={name}
         ref={inputRef}

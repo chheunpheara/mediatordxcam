@@ -81,6 +81,7 @@ export function makeProcessingResult(
         expiryDate: '2029-04-12',
       },
       missingFields: ['dateOfBirth'],
+      unclearFields: [],
     },
     face: {
       status: 'detected',

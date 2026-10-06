@@ -58,6 +58,12 @@ _KHMER_RE = re.compile(r"[\u1780-\u17ff]")
 #: Tesseract sometimes returns Khmer numerals where the card prints Latin 0-9.
 _KHMER_DIGITS = str.maketrans("០១២៣៤៥៦៧៨៩", "0123456789")
 
+#: A field whose own OCR words read below this confidence is captured but not
+#: trustworthy: the UI marks it for the user to verify (D24). 60 sits between
+#: the two readings a card gives — readable words land in the 60s and up, the
+#: garbled ones in the 20s and below.
+_UNCLEAR_CONFIDENCE = 60
+
 #: English month names as `strptime`'s `%b` knows them, plus the full spellings
 #: Tesseract sometimes returns instead.
 _EN_MONTHS = {
@@ -128,6 +134,41 @@ def _iso_date(day: str, month: int, year: str) -> str | None:
         return None
 
 
+def _pure_khmer_word(token: str) -> bool:
+    """A Khmer word OCR left intact: Khmer glyphs only, no digits or Latin.
+
+    The noise on a garbled name line (`ឧ76`, `ais`) is exactly what must not
+    reach a name field, and it is recognisable without knowing the language.
+    """
+    cleaned = token.strip(" ,.·:;!")
+    return (
+        bool(cleaned) and bool(_KHMER_RE.search(cleaned)) and not re.search(r"[\dA-Za-z]", cleaned)
+    )
+
+
+def _name_words(value: str | None) -> str | None:
+    """Only the intact Khmer words survive of a name (D24).
+
+    An NLP analysis that echoes the row's OCR noise must not land in a name
+    slot; whatever it leaves here is what the merge may consider.
+    """
+    if not value:
+        return None
+    kept = [token for token in value.split() if _pure_khmer_word(token)]
+    return " ".join(kept) or None
+
+
+def _conf_key(token: str) -> str | None:
+    """A comparable form of one word: Khmer digits normalised, noise stripped.
+
+    Both sides of a comparison go through here — the parsed value (whose text
+    already had Khmer digits translated) and the raw data-pass word — so
+    `១៥` and `15` are the same key.
+    """
+    key = re.sub(r"[^\w]", "", token.translate(_KHMER_DIGITS), flags=re.UNICODE).lower()
+    return key or None
+
+
 class LocalTesseractOcrProvider(OcrProvider):
     """Real on-device capture via Tesseract (no CamDX call)."""
 
@@ -148,22 +189,38 @@ class LocalTesseractOcrProvider(OcrProvider):
         return "tesseract"
 
     async def read_id_card(self, image_bytes: bytes, *, media_type: str) -> OcrResult:
-        text = self._ocr_text(image_bytes)
+        text, words = self._ocr_text(image_bytes)
         nlp = self._nlp.extract(text)
         rule = self._parse_id_card(text)
         identity = self._merge_rule_with_nlp(rule, nlp)
-        return self._result(identity, required=_REQUIRED_ID_FIELDS, doc=DocumentType.KHMER_ID_CARD)
+        return self._result(
+            identity,
+            required=_REQUIRED_ID_FIELDS,
+            doc=DocumentType.KHMER_ID_CARD,
+            unclear=self._unclear_fields(identity, words),
+        )
 
     async def read_passport(self, image_bytes: bytes, *, media_type: str) -> OcrResult:
-        text = self._ocr_text(image_bytes)
+        text, words = self._ocr_text(image_bytes)
         nlp = self._nlp.extract(text)
         rule = self._parse_passport(text)
         identity = self._merge_rule_with_nlp(rule, nlp)
-        return self._result(identity, required=_REQUIRED_PASSPORT_FIELDS, doc=DocumentType.PASSPORT)
+        return self._result(
+            identity,
+            required=_REQUIRED_PASSPORT_FIELDS,
+            doc=DocumentType.PASSPORT,
+            unclear=self._unclear_fields(identity, words),
+        )
 
     # -- OCR ----------------------------------------------------------------
 
-    def _ocr_text(self, image_bytes: bytes) -> str:
+    def _ocr_text(self, image_bytes: bytes) -> tuple[str, list[tuple[str, int]]]:
+        """The chosen pass's text plus its per-word confidences (D24).
+
+        The data pass runs on the very image that produced the text, so every
+        confidence belongs to a word the parse actually sees — the Khmer name
+        line, for one, only survives in the binarized pass.
+        """
         try:
             img = Image.open(io.BytesIO(image_bytes)).convert("L")
         except Exception as exc:
@@ -182,8 +239,56 @@ class LocalTesseractOcrProvider(OcrProvider):
         # Prefer the pass that preserves more Khmer glyphs (ID cards print the
         # name in Khmer); fall back to the one with the most total content.
         if len(_KHMER_RE.findall(threshold)) > len(_KHMER_RE.findall(clean)):
-            return str(threshold.translate(_KHMER_DIGITS))
-        return str(clean.translate(_KHMER_DIGITS))
+            return str(threshold.translate(_KHMER_DIGITS)), self._word_confidences(bw)
+        return str(clean.translate(_KHMER_DIGITS)), self._word_confidences(img)
+
+    def _word_confidences(self, img: Image.Image) -> list[tuple[str, int]]:
+        """`(word, confidence)` for every word Tesseract recognised.
+
+        Missing confidences must not fail a read that otherwise succeeded:
+        with none, no field can be marked unclear and the form falls back to
+        prompting only for what was not read at all.
+        """
+        try:
+            data = pytesseract.image_to_data(
+                img, lang=self._languages, output_type=pytesseract.Output.DICT
+            )
+        except Exception:
+            logger.info("tesseract data pass failed; field confidences unavailable")
+            return []
+        words: list[tuple[str, int]] = []
+        for raw, conf in zip(data["text"], data["conf"], strict=False):
+            if raw.strip() and int(conf) >= 0:
+                words.append((raw, int(conf)))
+        return words
+
+    def _unclear_fields(
+        self, identity: IdentityData, words: list[tuple[str, int]]
+    ) -> tuple[str, ...]:
+        """Fields whose own OCR words read below the confidence floor (D24).
+
+        Only words the data pass actually recognised count: a value it has no
+        word for (a normalised ISO date, say) has no confidence to report and
+        is not blamed for that. One low word taints the whole field — the
+        user is asked to verify a value only part of which the engine doubted.
+        """
+        if not words:
+            return ()
+        confidence: dict[str, int] = {}
+        for word, conf in words:
+            key = _conf_key(word)
+            if key:
+                confidence[key] = min(confidence.get(key, 100), conf)
+        unclear: list[str] = []
+        for name, value in identity.extracted_fields.items():
+            matched = [
+                confidence[key]
+                for key in (_conf_key(token) for token in value.split())
+                if key is not None and key in confidence
+            ]
+            if matched and min(matched) < _UNCLEAR_CONFIDENCE:
+                unclear.append(name)
+        return tuple(unclear)
 
     def _looks_khmer(self, value: str | None) -> bool:
         return bool(value) and _KHMER_RE.search(value or "") is not None
@@ -197,30 +302,38 @@ class LocalTesseractOcrProvider(OcrProvider):
             cleaned = re.sub(r"[\s\-/.,]", "", value).strip()
             return cleaned or None
 
-        first_from_rule = self._looks_khmer(rule.first_name_khmer)
-        last_from_rule = self._looks_khmer(rule.last_name_khmer)
-        cand_first = (
-            rule.first_name_khmer
-            if first_from_rule
-            else base.first_name_khmer
-            if self._looks_khmer(base.first_name_khmer)
-            else None
-        )
-        cand_last = (
-            rule.last_name_khmer
-            if last_from_rule
-            else base.last_name_khmer
-            if self._looks_khmer(base.last_name_khmer)
-            else None
-        )
-        # Avoid pouring the same single Khmer token into both name slots.
-        if cand_first and cand_last and cand_first == cand_last:
-            if first_from_rule and not last_from_rule:
-                cand_last = None
-            elif last_from_rule and not first_from_rule:
-                cand_first = None
-            else:
-                cand_first = None
+        def _khmer_pair(
+            first: str | None, last: str | None
+        ) -> tuple[str | None, str | None] | None:
+            if (
+                first
+                and last
+                and first != last
+                and self._looks_khmer(first)
+                and self._looks_khmer(last)
+            ):
+                return first, last
+            return None
+
+        # The card prints both Khmer names on one line, so slot-by-slot mixing
+        # is how a name gets duplicated or swapped. A complete pair from the
+        # NLP analysis of that line wins (D24), then the rule's pair (label or
+        # structural split), then whatever single side exists — never the same
+        # word in both slots. Whatever the model echoes back, only intact
+        # Khmer words may enter a name slot: an analysis repeating OCR noise
+        # (`ឧ76`) is not an answer.
+        nlp_first = _name_words(nlp.first_name_khmer) if nlp else None
+        nlp_last = _name_words(nlp.last_name_khmer) if nlp else None
+        pair = _khmer_pair(nlp_first, nlp_last)
+        if pair is None:
+            pair = _khmer_pair(rule.first_name_khmer, rule.last_name_khmer)
+        if pair is not None:
+            cand_first, cand_last = pair
+        else:
+            cand_first = nlp_first or rule.first_name_khmer
+            cand_last = nlp_last or rule.last_name_khmer
+            # A lone word cannot fill both slots.
+            if cand_first and cand_first == cand_last:
                 cand_last = None
 
         return IdentityData(
@@ -255,10 +368,19 @@ class LocalTesseractOcrProvider(OcrProvider):
             else:
                 first_en = first_en or full
 
+        kh_first = self._khmer_field(text, ("នាមដំបូង", "ឈ្មោះដំបូង", "ឈ្មោះ"))
+        kh_last = self._khmer_field(text, ("នាមត្រកូល", "ត្រកូល"))
+        if kh_first is None or kh_last is None:
+            # The card prints both Khmer names on one line (D24): when the
+            # family label does not OCR, the line's own structure splits them.
+            split_first, split_last = self._split_khmer_name(text)
+            if split_first is not None or split_last is not None:
+                kh_first, kh_last = split_first, split_last
+
         data = IdentityData(
             national_id=national_id,
-            first_name_khmer=self._khmer_field(text, ("នាមដំបូង", "ឈ្មោះដំបូង", "ឈ្មោះ")),
-            last_name_khmer=self._khmer_field(text, ("នាមត្រកូល", "ត្រកូល")),
+            first_name_khmer=kh_first,
+            last_name_khmer=kh_last,
             first_name_english=first_en,
             last_name_english=last_en,
             date_of_birth=(
@@ -326,7 +448,12 @@ class LocalTesseractOcrProvider(OcrProvider):
     # -- Helpers ------------------------------------------------------------
 
     def _result(
-        self, identity: IdentityData, *, required: tuple[str, ...], doc: DocumentType
+        self,
+        identity: IdentityData,
+        *,
+        required: tuple[str, ...],
+        doc: DocumentType,
+        unclear: tuple[str, ...] = (),
     ) -> OcrResult:
         missing = tuple(
             name for name in required if getattr(identity, _ATTRIBUTE_FOR[name]) is None
@@ -338,7 +465,11 @@ class LocalTesseractOcrProvider(OcrProvider):
         else:
             status = OcrStatus.COMPLETED.value
         return OcrResult(
-            status=status, identity=identity, document_type=doc, missing_fields=missing
+            status=status,
+            identity=identity,
+            document_type=doc,
+            missing_fields=missing,
+            unclear_fields=unclear,
         )
 
     # -- Paren/label routed capture helpers ----------------------------------
@@ -354,6 +485,32 @@ class LocalTesseractOcrProvider(OcrProvider):
 
     def _khmer_field(self, text: str, labels: tuple[str, ...]) -> str | None:
         return self._label_value(text, tuple(labels), "kh_name")
+
+    def _split_khmer_name(self, text: str) -> tuple[str | None, str | None]:
+        """Split the card's single Name line the way the card prints it.
+
+        The Khmer ID prints `ឈ្មោះ/Name <given> <family>` as one run of words
+        with no label between the two (D24), so when the family label does not
+        OCR the structure itself is the evidence: keep only the pure-Khmer
+        words, the last is the family name and the rest the given name. One
+        Khmer word cannot say which half it is, so both slots stay empty for
+        the user rather than guessing (§16).
+        """
+        for line in text.splitlines():
+            label = re.search(r"ឈ្មោះ|\bname\b", line, re.IGNORECASE)
+            if label is None:
+                continue
+            tokens = [
+                cleaned
+                for token in line[label.end() :].split()
+                if _pure_khmer_word(token)
+                for cleaned in [token.strip(" ,.·:;!")]
+            ]
+            if len(tokens) >= 2:
+                return " ".join(tokens[:-1]), tokens[-1]
+            if tokens:
+                return None, None
+        return None, None
 
     def _label_value(self, text: str, labels: tuple[str, ...], kind: str) -> str | None:
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]

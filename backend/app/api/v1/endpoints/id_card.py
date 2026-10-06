@@ -86,6 +86,7 @@ async def process_id_card(
                 expiryDate=result.ocr.identity.expiry_date,
             ),
             missingFields=list(result.ocr.missing_fields),
+            unclearFields=list(result.ocr.unclear_fields),
         ),
         face=FaceExtractionResponse(
             status=face.status.value,

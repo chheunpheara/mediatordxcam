@@ -30,6 +30,43 @@ _FIELD_KEYS = [
     "expiryDate",
 ]
 
+_CARD_STYLE = """\
+You are an OCR field extractor for a Cambodian National ID card (or passport).
+The card's printed style, which the extracted text follows:
+
+- Title: "KINGDOM OF CAMBODIA" / "KHMER NATIONAL IDENTITY CARD".
+- Name row: the label "ឈ្មោះ/Name" (or "ឈ្មោះ"), then the holder's Khmer name as
+  ONE run of words with the GIVEN NAME first and the FAMILY NAME last; the
+  Latin line right beneath prints the same two names in the SAME order
+  (GIVEN FAMILY). Split the Khmer run on that order: firstNameKhmer is
+  everything up to the last Khmer word, lastNameKhmer is the last Khmer word.
+  Any token in the run containing digits or Latin letters is OCR noise, not
+  part of the name — drop it before splitting. Worked example: a run reading
+  `<noise> WORD1 WORD2` yields firstNameKhmer="WORD1", lastNameKhmer="WORD2",
+  never the noise token.
+- Then rows for sex (ភេទ), date of birth (ថ្ងៃកំណើត), place of birth, address,
+  date of issue and date of expiry, and a machine-readable zone at the bottom.
+"""
+
+
+def _prompt(text: str) -> str:
+    """The extraction prompt: the JSON contract plus the card's name layout.
+
+    The card prints the Khmer name as a single run — given then family — with
+    no label between the two, so "which token is the family name" is exactly
+    the understanding a keyword scan cannot do; the layout note is what makes
+    the model answer it the way the card means it (D24).
+    """
+    return (
+        _CARD_STYLE
+        + "\nReturn ONLY a JSON object with exactly these keys: "
+        + ", ".join(_FIELD_KEYS)
+        + ". Use null when a value is not present. Dates are usually DD-MM-YYYY "
+        "or DD/MM/YYYY (or the Khmer-numeral form); convert each to YYYY-MM-DD. "
+        "gender must be 'M' or 'F'. Never invent a value that is not in the text."
+        "\n\nTEXT:\n" + text
+    )
+
 
 class OllamaFieldExtractor:
     def __init__(self, *, base_url: str | None, model: str) -> None:
@@ -43,13 +80,7 @@ class OllamaFieldExtractor:
     def extract(self, text: str) -> IdentityData | None:
         if not self._base_url:
             return None
-        prompt = (
-            "You are an OCR field extractor. From the following OCR text of a Cambodian "
-            "ID card / passport, return ONLY a JSON object with exactly these keys: "
-            f"{', '.join(_FIELD_KEYS)}. Use null when a value is not present. Dates are "
-            "usually DD-MM-YYYY or DD/MM/YYYY; convert each to YYYY-MM-DD. "
-            "gender must be 'M' or 'F'.\n\nTEXT:\n" + text
-        )
+        prompt = _prompt(text)
         try:
             resp = httpx.post(
                 f"{self._base_url}/api/generate",

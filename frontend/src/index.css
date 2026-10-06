@@ -96,6 +96,13 @@
     disabled:cursor-not-allowed disabled:opacity-50;
 }
 
+/* A field OCR captured but read poorly (D24): the tint pairs with the
+   "Verify this field" prompt beneath it, so the colour alone never carries
+   the meaning (§32). Declared after `input` so its background wins. */
+@utility input-unclear {
+  @apply border-negative bg-negative-soft;
+}
+
 /* Screen-reader-only content: visible to assistive tech, invisible on screen. */
 .sr-only-focusable:not(:focus):not(:focus-within) {
   position: absolute;

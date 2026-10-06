@@ -78,6 +78,9 @@ class OcrResult:
     document_type: DocumentType | None = None
     #: Fields OCR could not read. The UI prompts for these (§16).
     missing_fields: tuple[str, ...] = field(default_factory=tuple)
+    #: Fields OCR read but at a low word confidence: captured, yet the UI asks
+    #: the user to verify them rather than trusting them silently (D24).
+    unclear_fields: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def is_usable(self) -> bool:

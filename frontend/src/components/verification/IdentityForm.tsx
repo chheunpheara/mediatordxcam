@@ -73,6 +73,7 @@ export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFor
       <form className="mt-4 grid gap-3" onSubmit={(e) => e.preventDefault()}>
         {IDENTITY_FORM_FIELDS.map((field) => {
           const wasMissing = ocr.missingFields.includes(field.name)
+          const isUnclear = ocr.unclearFields.includes(field.name)
           const inputId = `${formId}-${field.name}`
           const hintId = `${inputId}-hint`
           const empty = values[field.name].trim() === ''
@@ -90,7 +91,8 @@ export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFor
               ) : null}
               {field.kind === 'date' ? (
                 <DateInput
-                  ariaDescribedBy={wasMissing || empty ? hintId : undefined}
+                  ariaDescribedBy={wasMissing || empty || isUnclear ? hintId : undefined}
+                  className={isUnclear ? 'input-unclear' : undefined}
                   id={inputId}
                   name={field.name}
                   onChange={(next) => setField(field.name, next)}
@@ -100,8 +102,8 @@ export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFor
                 />
               ) : (
                 <input
-                  aria-describedby={wasMissing || empty ? hintId : undefined}
-                  className="input mt-1 w-full"
+                  aria-describedby={wasMissing || empty || isUnclear ? hintId : undefined}
+                  className={`input mt-1 w-full${isUnclear ? ' input-unclear' : ''}`}
                   id={inputId}
                   name={field.name}
                   onChange={(event) => setField(field.name, event.target.value)}
@@ -113,6 +115,8 @@ export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFor
               )}
               {empty && field.required ? (
                 <p className="text-negative mt-1 text-xs">Please enter this information.</p>
+              ) : isUnclear && source === 'document' ? (
+                <p className="text-negative mt-1 text-xs">Verify this field</p>
               ) : wasMissing && source === 'document' ? (
                 <p className="text-ink-subtle mt-1 text-xs">
                   Not read from the card — please check and enter it.

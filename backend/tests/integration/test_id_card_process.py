@@ -93,7 +93,13 @@ async def test_the_response_carries_the_contract_the_frontend_reads(send) -> Non
 
     body = response.json()
     assert set(body) >= {"processingId", "status", "ocr", "face", "documentRef"}
-    assert set(body["ocr"]) >= {"status", "documentType", "fields", "missingFields"}
+    assert set(body["ocr"]) >= {
+        "status",
+        "documentType",
+        "fields",
+        "missingFields",
+        "unclearFields",
+    }
     assert set(body["face"]) >= {"status", "source", "detectedCount", "faceRef"}
 
 

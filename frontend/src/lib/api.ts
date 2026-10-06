@@ -62,6 +62,8 @@ export interface IdentityResponse {
   readonly documentType: string | null
   readonly fields: IdentityFields
   readonly missingFields: readonly string[]
+  /** Fields OCR read at a low word confidence; the form asks the user to verify them (D24). */
+  readonly unclearFields: readonly string[]
 }
 
 export interface FaceBox {
