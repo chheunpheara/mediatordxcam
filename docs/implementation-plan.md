@@ -1,19 +1,76 @@
-# Implementation Plan
+# Implementation Plan and Requirements
 
-Derived from `camdx_execution_plan.md` §36. Phase order is preserved; each phase
-carries an explicit exit criterion that must be demonstrated before the next
-phase starts (§38).
+Rewritten against the tree as it stands at commit `e02da63`. Phases 1–7 are
+shipped and green, Phase 9 is partially shipped, Phases 8 and 10 are open.
+Every claim names the module that implements it; an unfinished phase keeps the
+exit criteria it still owes. Decisions are in §7, risks in §6.
+
+Current gate: `make check` passes — **537** backend tests (pytest, `ruff`,
+`mypy --strict`) and **329** frontend tests across 37 files (eslint, tsc,
+vitest).
 
 ---
 
-## Rules of execution
+## 1. Requirements
 
-1. One phase at a time. No later phase is implemented until the current phase's
-   acceptance is demonstrated.
-2. No unresolved errors at phase exit — a failing check is fixed, not deferred.
+### 1.1 Functional, as implemented
+
+| # | Requirement | Implemented by |
+|---|-------------|----------------|
+| R1 | Accept a Cambodian National ID image (JPG/PNG/WebP) with client-side type, size, readability and resolution gates, verbatim rejection messages, and a preview whose blob URL is revoked; the bytes survive a refresh in IndexedDB | `features/document-upload`, `pages/LandingPage`, `lib/session` |
+| R2 | Process the card server-side: store → local OCR (Tesseract) → face detection and crop (OpenCV), returning the nine §14 identity fields; a Khmer name split runs through an offline/Ollama NLP path and low-confidence fields are flagged for the user | `services/documents.py`, `services/local_ocr.py`, `services/face.py`, `services/nlp_extract.py`, `POST /api/v1/kyc/id-card/process` |
+| R3 | Present an editable identity form covering all nine fields, marking OCR-uncertain values rather than hiding them | `components/verification/IdentityForm`, `features/identity-form` |
+| R4 | Offer the six official methods from one requirement matrix that the UI renders and the backend validates independently | `domain/requirements.py`, `GET /api/v1/kyc/verification-methods`, `components/verification/VerificationMethodPanel` |
+| R5 | Capture the current face from the teller's own camera or an upload, gate it on exactly one detected face, and keep the handle in the session store | `features/face-capture`, `POST /api/v1/kyc/face-capture` |
+| R6 | Record a liveness clip on a second screen: the teller's command opens the customer monitor's camera, frames stream back to the teller's preview at ~12 fps, a 3-second `MediaRecorder` clip is uploaded by the customer tab, and the teller adopts the server-issued handle into the artefact slot the verify call reads | `features/onboarding/*`, `pages/TellerDashboard`, `pages/CustomerDisplay`, `POST /api/broker/verify-liveness` |
+| R7 | Take the current-face **photo** from the customer display: choosing a method that needs the customer's face enables that camera, the teller presses one button, and the still is uploaded through the existing face-capture pipeline | `features/onboarding/RemoteFaceCapture.tsx` |
+| R8 | Run a method against only its own inputs, re-checked server-side (`422 REQUIREMENTS_NOT_MET`) so a bypassed UI cannot skip a requirement | `domain/requirements.py`, `services/kyc.py`, `POST /api/v1/kyc/verify` |
+| R9 | Report the outcome in plain language: `success`/`partial`/`failed`, field rows with icon + word (never colour alone), section rows for face/ID card/liveness, and no JSON, endpoint, status code or score anywhere in the DOM | `domain/verification.py`, `components/verification/FieldCheckList`, `statusDisplay`, `sectionRows` |
+| R10 | Require sign-in for the whole app, with roles whose permissions are exactly the six method ids, administered in an admin area | `features/auth`, `features/admin`, `services/auth.py`, `api/v1/endpoints/admin.py` |
+| R11 | Leave an append-only audit entry for every action that touches an identity, maskable at the write boundary and readable only by an administrator | `infrastructure/audit_store.py`, `services/audit.py`, `GET /api/v1/admin/audit-logs` |
+| R12 | Replay a result to configured core systems (HTTP Basic, per-target report, test connection) and manage bulk verification records | `api/v1/endpoints/integrations.py`, `api/v1/endpoints/records.py`, `features/records` |
+| R13 | Export the verified values from the browser as xlsx, csv or json with column selection | `components/verification/exportData`, `ExportModal` |
+
+### 1.2 Non-functional
+
+- **N1 — Privacy.** No biometric data is persisted. Artefacts live in a
+  temporary store behind opaque, TTL-swept handles and are streamed
+  (`services/artifacts.py`), never statically mounted; every `/api/` response
+  is `no-store`; logs are redacted (`core/logging`).
+- **N2 — Detection is not verification.** `FaceExtraction` carries no
+  `verified`/`score` field, so a local OpenCV crop cannot be rendered as a
+  government identity check even by accident.
+- **N3 — Requirements are computed, not hard-coded.** One matrix serves both
+  sides; a contract test fails on drift (D2).
+- **N4 — No technical text escapes.** Upstream errors pass a translation layer
+  into business codes with sentences written for a person (§28).
+- **N5 — Accessibility (§32).** Global focus ring, `role="status"`/`aria-live`
+  regions for every asynchronous state, icon + text for status, keyboard-
+  reachable controls, `prefers-reduced-motion` honoured.
+- **N6 — Deterministic tests.** `conftest.py` forces `CAMDX_MODE=mock` and
+  `DATABASE_URL=''`; no test touches a real CamDigiKey service, a real document
+  or randomness.
+- **N7 — One command validates the build.** `make check` runs identically in
+  Docker and against a local venv.
+
+### 1.3 Deliberately open
+
+| Item | State |
+|------|-------|
+| Phase 8 — Passport OCR (API 6) | Not started. `/id-card/passport` exists as a route, the method reports `unavailable` with the backend's own reason. |
+| Phase 9 recovery affordances | `KycResult.actions` is not built; the report renders status, fields and section rows but offers no next-step actions. |
+| Contract tests (`tests/contract/`) and E2E (`tests/e2e/`, Playwright) | Directories reserved; Phase 10. |
+| Rate limiting, full security-header and accessibility audit sign-off | Phase 10. |
+| Real CamDX (CamDigiKey) providers | Seams isolated behind the provider port; open questions in `docs/camdx-integration.md`. |
+
+### 1.4 Rules of execution
+
+1. One phase at a time. No later phase is implemented until the current
+   phase's acceptance is demonstrated.
+2. No unresolved errors at phase exit - a failing check is fixed, not deferred.
 3. Tests are written in the same phase as the code they cover.
-4. No requirement is silently altered. A change is a documented decision in this
-   file under "Decision log".
+4. No requirement is silently altered. A change is a documented decision in
+   this file under "Decision log".
 5. CamDX behaviour is never invented. Where the real contract is unknown, the
    seam is isolated behind `CamDXProvider` and the unknown is listed in
    `docs/camdx-integration.md` as an open question.
@@ -21,212 +78,292 @@ phase starts (§38).
 
 ---
 
-## Phase 1 — Foundation ✅ (current)
+## 2. System architecture
 
-**Scope**
+### 2.1 Overview
 
-- Git repository, `.gitignore`, `.editorconfig`
-- `docker-compose.yml` (backend, frontend, optional postgres profile — later the
-  default stack, D13)
-- `backend/` FastAPI app: factory, `Settings`, structured logging with redaction,
-  error taxonomy, DI container
-- `GET /health` and `GET /api/v1/health` — liveness + readiness
-- `frontend/` React 19 + TypeScript + Vite + Tailwind v4 + React Router shell
-  with the two route targets (`/`, `/id-card`) as placeholders
-- `.env.example`, README, all `docs/`
-- Backend unit + integration tests, frontend build and test config
+```text
+                    Browser — React 19 SPA (Vite build, nginx or `vite dev`)
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  /login   /   /id-card   /admin   /teller        /display           │
+  │  teller workspace (auth + admin)   customer monitor (public tab)    │
+  └───────┬──────────────────────────────────────┬───────────────────────┘
+          │ HTTPS  JSON / multipart              │ WSS  /ws/onboarding/{id}
+          │ (cookie session)                     │ (role=teller|customer)
+  ┌───────▼──────────────────────────────────────▼───────────────────────┐
+  │  FastAPI (uvicorn; nginx proxies /api, /health, /docs)              │
+  │  ┌──────────────┐ ┌────────────┐ ┌───────────┐ ┌──────────────────┐  │
+  │  │ api/v1       │→│ services   │→│ domain    │ │ integrations/    │  │
+  │  │ endpoints    │ │ (use cases)│ │ (pure)    │ │ camdx (port)     │  │
+  │  └──────────────┘ └────────────┘ └───────────┘ └───┬──────────┬───┘  │
+  │        │                │                          │          │      │
+  │  ┌─────▼────────────────▼──────────┐        MockCamDX   RealCamDX    │
+  │  │ infrastructure (stores, audit)  │                               │  │
+  │  └─────┬───────────────────────────┘                               │  │
+  └────────┼───────────────────────────────────────────────────────────┘
+           ▼
+   PostgreSQL / SQLite            Temporary artefact store (TTL sweeper)
+   identity registry, auth,       id-card images, face crops, liveness
+   roles, permissions, audit,     clips, face photos — handle-addressed
+   records, integration settings
+```
 
-**Exit criteria (§36)**
+Four layers, dependencies pointing inward only: `domain` is pure (no I/O, no
+framework), `services` orchestrates, `api` translates, `infrastructure` and
+`integrations` reach outward. Full detail: `docs/architecture.md`.
 
-- [x] `docker compose up --build` reaches healthy state
-- [x] `GET /health` → `200 {"status":"ok"}`
-- [x] `GET /api/v1/health` → `200` with version, mode, environment
-- [x] Frontend serves and `/id-card` resolves (no route fallback to 404)
-- [x] `pytest` green, `ruff` clean, `mypy` clean
-- [x] `tsc --noEmit` clean, `vitest` green, `vite build` succeeds
-- [x] Frontend dev server proxies `/api` to the backend
-- [x] No secret is committed; `.env` is git-ignored
+### 2.2 Backend module map
 
-**Deliberately excluded from Phase 1** — these are Phase 5 constructs and only
-their directories exist: `app/domain/requirements.py`, `app/integrations/camdx/*`,
-`app/services/kyc_service.py`. Phase 1 validates the *seams*, not the features.
+| Directory | Responsibility | Notable modules |
+|---|---|---|
+| `app/api/v1/endpoints/` | HTTP + WebSocket surface | `auth`, `id_card`, `face_capture`, `verification`, `broker`, `onboarding`, `artifacts`, `records`, `integrations`, `admin`, `health` |
+| `app/services/` | Application use cases | `kyc`, `documents`, `face`, `local_ocr`, `nlp_extract`, `artifacts`, `auth`, `audit`, `records`, `integrations`, `onboarding`, `identity_registry` |
+| `app/domain/` | Pure rules | `requirements` (the method matrix), `verification` (status derivation), `models`, `enums`, `auth` |
+| `app/infrastructure/` | Persistence | `db` (registry), `auth_store`, `audit_store`, `record_store`, `integration_store`, `liveness_settings_store` |
+| `app/integrations/camdx/` | Provider port | `mock/`, `verify.py`, `ocr.py`, `services/` |
+| `app/schemas/` | Pydantic contracts | request/response models shared by every endpoint |
+| `backend/tests/{unit,integration}` | 537 tests | domain unit, FastAPI-over-ASGI integration, scenario tests |
 
----
+### 2.3 Frontend module map
 
-## Phase 2 — Landing Page
+| Directory | Responsibility |
+|---|---|
+| `app/` | route table, `AppRoutes`, authenticated layout, header |
+| `pages/` | thin composition roots: `LandingPage`, `IdCardPage`, `LoginPage`, `AdminPage`, `TellerDashboard`, `CustomerDisplay` |
+| `features/document-upload` | dropzone, validation, IndexedDB persistence |
+| `features/id-card-processing`, `identity-form` | processing state, nine-field editing |
+| `features/face-capture` | current-face capture + handle (context/provider) |
+| `features/liveness` | liveness artefact handle (context/provider) |
+| `features/onboarding` | dual-screen relay: `onboardingSocket`, `RemoteCameraFeed`, `RemoteFaceCapture`, `useLiveFrame` |
+| `features/verification`, `report` | method selection state, result presentation |
+| `features/admin`, `auth`, `records` | administration, sign-in, bulk records |
+| `components/verification/` | workspace columns, identity form, method panel, field checklist, export/post/upload dialogs |
+| `lib/` | `api` (typed fetch + error mapping), `session` (sessionStorage slices), `auth`, `routes` |
 
-**Scope** §6, §7, §31
+### 2.4 Dual-screen onboarding (the one real-time path)
 
-- `features/document-upload`: drag-and-drop + file picker, client-side validation
-  (type, size, readability, minimum resolution) with the exact messages in §7
-- Image decode/dimension probe in the browser (`createImageBitmap`)
-- Object-URL preview with revocation on replace/unmount
-- Route to `/id-card`, carrying the upload through a session store
-- Keyboard-accessible dropzone, `aria-live` status region
-- Mobile-first layout, tablet/desktop breakpoints
+One WebSocket per tab, one relay that never inspects a payload — it delivers to
+the *other* role in the room (`app/services/onboarding.py`).
 
-**Exit criteria**
+| Direction | Envelope | Meaning |
+|---|---|---|
+| teller → customer | `activateLiveness` | open the camera for a recording |
+| teller → customer | `startRecording` | record 3 s (held if the camera is still opening) |
+| teller → customer | `activateFaceCapture` | open the camera for a photo |
+| teller → customer | `capturePhoto` | take the still now |
+| teller → customer | `cancelSession` | reset: rip down, back to the welcome screen |
+| customer → teller | `customerState`, `frame`, `recordingStarted`, `recordingFinished(livenessRef)`, `photo`, `error` | progress and results |
+| server → room | `peerJoined` | a tab (re)connected; the teller panel re-sends its current command |
 
-- User can upload a valid JPG/PNG/WebP by click or drag and land on `/id-card`
-- Each §7 rejection message appears verbatim and accessibly
-- Oversized, non-image, unreadable and low-resolution files are all rejected client-side
-- Preview never leaks a blob URL into the console
-- Component tests cover each validation branch
+```text
+Teller panel                 Relay                    Customer monitor
+     │  activateLiveness ────►│──────────────────────────►│ camera opens
+     │◄─── frame ×12/s ───────│◄──────────────────────────│ canvas preview
+     │  startRecording ──────►│──────────────────────────►│ 3 s recording
+     │◄── recordingFinished ──│◄──────────────────────────│ upload → livenessRef
+     │  adopt(livenessRef)    │                           │ camera closes,
+     │                        │                           │ last frame kept
+```
 
----
+Guard rules, all tested: the activation command is re-sent on `peerJoined` and
+on panel mount **only while no artefact exists** — after a clip or a photo the
+customer's camera stays closed until the teller asks again (Re-record / Retake);
+the incoming `startRecording` that beats the permission prompt is held, not
+refused; a taken still is copied *before* the tracks stop, so the picture stays
+on the oval after the camera closes.
 
-## Phase 3 — ID Card Processing
+### 2.5 State and storage
 
-**Scope** §12, §15, §16, §29
+| Store | Holds | Lifetime |
+|---|---|---|
+| Session cookie (opaque, 256-bit, 12 h) | sign-in | `infrastructure/auth_store` |
+| PostgreSQL / SQLite tables | identity registry (D13), users/roles/permissions, audit log (append-only triggers), records, integration settings, liveness-page settings | process lifetime; `CREATE TABLE IF NOT EXISTS` at startup, no Alembic by design |
+| Temporary artefact store | id-card images, face crops, liveness clips, face photos | TTL + sweeper, handle-addressed, audited |
+| Browser `sessionStorage` slices | processing result, face/liveness handles, `docStored` marker | per tab; handles are scoped to the document they came from |
+| Browser IndexedDB | the uploaded document bytes | cleared on back-to-upload (D21) |
 
-- `infrastructure/storage.py`: TTL temp artifact store with opaque handles
-- `infrastructure/imaging.py`: decode, size/resolution gate, normalise, thumbnail
-- `services/face_service.py`: OpenCV cascade detection, bbox, crop, quality gate
-- `services/document_service.py`: store → CamDX Khmer ID OCR → face extraction
-- `MockCamDXProvider` OCR (API 5) returning realistic Khmer/English field pairs
-- `POST /api/v1/kyc/id-card/process`
-- Empty-field semantics: never guess, never fabricate (§16)
+### 2.6 Security model
 
-**Exit criteria**
-
-- Upload yields extracted identity fields **and** an extracted face
-- §12's three failure messages reproduced exactly, each with a distinct code
-- No face is ever fabricated; a failed detection returns a failure, not a blank crop
-- Artefacts are reachable only through handles and are swept after TTL
-- Scenario H (no face detected) passes end-to-end
-- Local OpenCV result is labelled as detection, never verification (§13)
-
----
-
-## Phase 4 — Three-Column Workspace
-
-**Scope** §8, §9, §12, §14, §31
-
-- Column 1: original document preview with zoom, filename, processing status,
-  replace; the extracted face sits beneath it with a persistent "local
-  detection — not a verification" notice (§13) — order per D14
-- Column 2: editable identity form — all nine fields from §14, OCR-uncertain
-  fields flagged, empty fields prompting "Please enter this information."
-- Column 3: verification-method panel and Verify
-- Desktop 3-col / tablet 2-col / mobile stacked order per §31
-
-**Exit criteria**
-
-- Every extracted value is present and editable; edits survive method changes
-- Mobile order is exactly §31's six steps
-- Keyboard reaches every control in a sensible order
-- No colour-only signalling; status uses icon + text (§32)
-
----
-
-## Phase 5 — Verification Method Engine
-
-**Scope** §10, §11, §19, §20, §21, §23, §33
-
-- `domain/requirements.py` requirement matrix (authoritative)
-- `domain/state_machine.ts` equivalent + `domain/results.py`
-- `integrations/camdx/`: provider port, factory, client, models, exceptions,
-  error mapper, normalizer, and the six per-API service modules
-- `MockCamDXProvider` covering all six APIs with deterministic outcomes
-- `GET /api/v1/kyc/verification-methods`, `POST /api/v1/kyc/verify`
-- `services/kyc_service.py`: independent backend requirement validation
-- Frontend method selector driven by the fetched matrix
-
-**Exit criteria**
-
-- Each method asks only for its own inputs
-- `POST /verify` with missing inputs → `422 REQUIREMENTS_NOT_MET` naming the fields,
-  even if the frontend was bypassed
-- Frontend TS mirror ≡ API response (contract test green)
-- Raw CamDX payload never appears in any response body
-- Scenario A (ID Card → OCR → API 1 → success) passes
-- Scenario F (wrong identity → partial/failure) passes
+- Every route except `/login`, `/display` and not-found is behind sign-in
+  (D18); the backend enforces the same rules independently. `401`/`403` are
+  reserved for authentication/authorisation, `422` stays business validation.
+- Permissions are exactly the six method ids, so the admin matrix and the
+  method cards share one vocabulary; Post-to-Core additionally requires the
+  full six-permission set (D19).
+- `TrustedHost`, CORS and a `no-store` API middleware are installed in
+  `app/main.py`; the customer display socket is public but scoped to the
+  session id it was handed.
+- Secrets never round-trip: integration passwords are write-only, audit
+  payloads are masked at the write boundary, national IDs are truncated in the
+  audit trail.
 
 ---
 
-## Phase 6 — Current Face Capture
+## 3. Libraries and plugins
 
-**Scope** §17
+### 3.1 Backend runtime (`backend/pyproject.toml`, Python `>=3.12,<3.14`)
 
-- `features/face-capture`: `getUserMedia` capture and file upload
-- Exactly-one-face gate using the same detector as Phase 3
-- Retake / remove / replace, preview, verification locked until valid
-- APIs 2 and 3 wired through the provider
+| Package | Role |
+|---|---|
+| `fastapi`, `uvicorn[standard]` | HTTP + WebSocket application and server |
+| `pydantic`, `pydantic-settings` | contracts, typed settings (mypy plugin active) |
+| `httpx` | outbound calls — CamDX provider port, Ollama, core-system posting |
+| `python-multipart` | multipart uploads (document, face, liveness clip) |
+| `sqlalchemy`, `psycopg[binary]` *(extra `db`)* | identity registry and auth/audit/record stores, PostgreSQL or SQLite |
+| `opencv-python-headless<5`, `numpy`, `pytesseract`, `Pillow` *(extra `vision`)* | face detection and crop, Khmer/English OCR, image normalisation |
+| `pyyaml` *(extra `compose`/`dev`)* | compose contract test |
 
-**Exit criteria**
+Optional external: **Ollama** (`ollama_base_url`/`ollama_model` in
+`core/config.py`) for the Khmer name-split NLP path, with an offline
+structural splitter as the guaranteed fallback (D24). Mock CamDX mode is the
+default and the only mode tests run in.
 
-- API 2/3 requests are rejected without a valid current face, at both layers
-- Multi-face current photos are rejected with a clear message
-- Camera permission denial is handled gracefully
-- Scenarios B, C and G pass
+### 3.2 Frontend runtime (`frontend/package.json`, Node `>=20.19`)
 
----
+| Package | Role |
+|---|---|
+| `react` 19, `react-dom` 19 | UI runtime |
+| `react-router-dom` 7 | route tree and guards (`RequireAuth`, `RequireAdmin`) |
+| `react-day-picker` 10 | accessible calendar for the three date fields (D20) |
+| `xlsx` (SheetJS) | browser-side CSV/Excel import for bulk records and xlsx/csv/json export (D17, D23) |
+| `tailwindcss` 4 via `@tailwindcss/vite` | design tokens in `@theme`, no `tailwind.config.js` (D9) |
+| Browser APIs, no extra library | `getUserMedia`, `MediaRecorder`, canvas frame capture, `createImageBitmap`, IndexedDB |
 
-## Phase 7 — Liveness
+### 3.3 Toolchain (plugins included)
 
-**Scope** §18
-
-- `features/liveness`: 3-step workflow (turn left → turn right → nod), progress,
-  camera preview, per-step capture status
-- Liveness session resource in the backend: start → submit action → complete
-- `MockLivenessProvider`, clearly isolated, replaceable by the real implementation
-- API 4 adapter
-
-**Exit criteria**
-
-- API 4 is unreachable without a completed liveness session
-- Uploaded stills cannot satisfy the liveness requirement
-- A failed action produces the §27 failure message and a retry affordance
-- Scenario D and Scenario I pass
-
----
-
-## Phase 8 — Passport OCR
-
-**Scope** §2 API 6
-
-- `api/v1/passport`, `services/passport_ocr.py`, `features/passport`
-- Independent of the ID-card flow
-
-**Exit criteria**
-
-- Scenario E passes: passport image → API 6 → editable passport fields
-- The ID-card journey is untouched by this feature
+| Concern | Backend | Frontend |
+|---|---|---|
+| Lint | `ruff check` (E, F, I, B, UP, **S**-bandit, C4, SIM, RUF), line length 100 | `eslint` 9 flat config + `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`, `globals` |
+| Format | `ruff format --check` | (prettier not used — eslint only) |
+| Types | `mypy --strict` with `pydantic.mypy` plugin | `tsc --noEmit`, `typescript` 5.9 |
+| Unit/integration tests | `pytest`, `pytest-asyncio` (auto mode), `pytest-cov` | `vitest` 5 + `@testing-library/react`/`user-event`/`jest-dom`, `jsdom`, `fake-indexeddb` |
+| Build/run | `uvicorn`, `docker compose` | `vite` 8 (`@vitejs/plugin-react`), nginx in the container, dev proxy for `/api`, `/health`, `/ws` |
+| Planned (Phase 10) | — | Playwright against the compose stack (`tests/e2e/`) |
 
 ---
 
-## Phase 9 — Verification Report
+## 4. Implementation plan
 
-**Scope** §24, §25, §26, §27
+Status: ✅ shipped and green · 🟡 partially shipped · ⬜ open.
+Phase order and the one-phase-at-a-time rule are unchanged; exit criteria for
+an open phase are the work it still owes.
 
-- `features/report`: success / partial / failed presentations
-- Only relevant sections render (API 1 shows no face section)
-- Field-level matched/mismatched rows, green check icons, non-colour cues
-- Recovery actions driven by `KycResult.actions`
+| Phase | Title | Status |
+|---|---|---|
+| 1 | Foundation | ✅ |
+| 2 | Landing page / upload | ✅ |
+| 3 | ID card processing | ✅ |
+| 4 | Three-column workspace | ✅ |
+| 5 | Verification method engine | ✅ |
+| 6 | Current face capture | ✅ |
+| 7 | Liveness | ✅ |
+| 8 | Passport OCR | ⬜ |
+| 9 | Verification report | 🟡 |
+| 10 | Hardening | ⬜ |
 
-**Exit criteria**
+### Phase 1 — Foundation ✅
 
-- Scenario C reports identity + face + ID card; Scenario A reports identity only
-- No raw JSON, endpoint, HTTP status or score anywhere in the DOM
-- Partial results list exactly the mismatching fields
-- Every failure state offers an actionable next step (§27)
+Factory, `Settings`, redacting logs, error taxonomy, DI; `/health`,
+`/api/v1/health`, `/health/ready`; React shell with routes; `docker-compose.yml`
+(frontend, backend, postgres); `.env.example`, README, all `docs/`.
+Exit criteria: all met (healthy compose, health payloads, proxy, green suites,
+no committed secret).
+
+### Phase 2 — Landing page ✅
+
+`features/document-upload`: drag-and-drop + picker, §7 validation messages
+verbatim, `createImageBitmap` dimension probe, object-URL revocation,
+keyboard-accessible dropzone, `aria-live` region, and D21's IndexedDB
+persistence so a refresh does not empty the workspace.
+
+### Phase 3 — ID card processing ✅
+
+TTL artefact store with opaque handles, imaging normalisation, OpenCV cascade
+detection with a quality gate, Tesseract OCR producing the nine fields, the
+NLP Khmer name split with low-confidence flagging (D24), empty-field semantics
+(never guess), `POST /api/v1/kyc/id-card/process`. Exit criteria: met — three
+§12 failure messages with distinct codes, no fabricated face, Scenario H.
+
+### Phase 4 — Three-column workspace ✅
+
+Document column with zoom and the face card beneath it (D14), editable nine-
+field identity column, method column; responsive order per §31; no colour-only
+signalling. Exit criteria: met.
+
+### Phase 5 — Verification method engine ✅
+
+`domain/requirements.py` as the single source, the six per-API service modules,
+`MockCamDXProvider`, `GET /verification-methods`, `POST /verify` with
+independent backend validation, the frontend matrix fetch, and D13's identity
+registry as the comparison source. Exit criteria: met — Scenarios A and F.
+
+### Phase 6 — Current face capture ✅
+
+`features/face-capture` with local camera or upload, exactly-one-face gate,
+handle in the session store, APIs 2 and 3 wired. Exit criteria: met —
+Scenarios B, C, G (multi-face rejected, permission denial handled).
+
+### Phase 7 — Liveness ✅
+
+Shipped as the **dual-screen** flow rather than the §18 in-browser three-step
+workflow: `app/services/onboarding.py` relay + `/ws/onboarding/{id}`, teller
+`TellerDashboard`/`RemoteCameraFeed`, customer `CustomerDisplay`, clip upload
+through `POST /api/broker/verify-liveness`, handle adoption into the shared
+artefact slot. Since then: no preview blinking (canvas feed), the camera
+stays closed after a clip, the customer screen is white with a dark-blue oval
+frame and keeps the last picture, and R7 added customer-display **photo
+capture** for face methods. Exit criteria: API 4 reachable only with a
+completed recording, a still cannot satisfy the liveness requirement,
+Scenario D; Scenario I remains open with Phase 10's end-to-end work.
+
+### Phase 8 — Passport OCR ⬜
+
+**Scope** §2 API 6 — `api/v1/passport`, `services/passport_ocr.py`,
+`features/passport`, reachable from `/id-card/passport`.
+
+**Exit criteria** — Scenario E (passport image → API 6 → editable passport
+fields); the ID-card journey untouched; the method flips from `unavailable` to
+runnable.
+
+### Phase 9 — Verification report 🟡
+
+**Shipped** — status derivation (`success`/`partial`/`failed`) in
+`domain/verification.py`, field checklist with icon + word, section rows (D15),
+in-session result accumulation (D16), export (D17), post-to-core (D19).
+
+**Still owed** — recovery actions driven by `KycResult.actions`; a failed
+state must offer an actionable next step (§27).
+
+### Phase 10 — Hardening ⬜
+
+**Exit criteria** — retention sweeper verified under load, artefact access
+audit, log-redaction verification; HTTPS-ready config, security headers, rate
+limiting on upload/verify; accessibility audit against §32; contract tests and
+Playwright Scenarios A–I green against the compose stack; README verified from
+a clean checkout; §37 walked item by item.
 
 ---
 
-## Phase 10 — Hardening
+## 5. Quality gates
 
-**Scope** §29, §30, §32, §34, §35, §37
+```bash
+make check      # = backend-lint backend-format backend-typecheck backend-test
+                #   + frontend-lint frontend-typecheck frontend-test
+```
 
-- Retention sweeper, artefact access audit, log redaction verification
-- HTTPS-ready config, security headers, rate limiting on upload/verify
-- Full accessibility audit against §32
-- Unit + integration + E2E suite green; Scenarios A–I all passing
-- Documentation complete and accurate; README verified against a clean checkout
-- §37 checklist walked item by item with evidence
+| Gate | Tool | Current |
+|---|---|---|
+| Backend lint/format | `ruff check`, `ruff format --check` | clean |
+| Backend types | `mypy --strict` (pydantic plugin) | 74 files, no issues |
+| Backend tests | `pytest` (unit + integration, mock mode forced) | 537 passed |
+| Frontend lint | `eslint` (flat config, react-hooks, typescript-eslint) | clean |
+| Frontend types | `tsc --noEmit` | clean |
+| Frontend tests | `vitest` + Testing Library (jsdom) | 329 passed / 37 files |
 
----
+Test layout and rules: `docs/testing.md`. CI and local runs use the same
+targets; no test may skip.
 
-## Risk register
+## 6. Risk register
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
@@ -240,7 +377,7 @@ their directories exist: `app/domain/requirements.py`, `app/integrations/camdx/*
 
 ---
 
-## Decision log
+## 7. Decision log
 
 | # | Decision | Rationale |
 |---|----------|-----------|
