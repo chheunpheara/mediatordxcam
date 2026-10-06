@@ -28,6 +28,13 @@ import { pickMimeType } from '../features/liveness/mimeTypes'
  * command — `activateLiveness`, or the `startRecording` that carries a
  * re-record — which the held-start path above already handles.
  *
+ * A method that needs the customer's photo works the same way from the
+ * other end: `activateFaceCapture` opens this camera for the still, the
+ * frames below keep streaming to the teller's preview, and `capturePhoto`
+ * takes one and sends it back as `photo`. The camera closes afterwards just
+ * as it does after a recording, keeping the picture on the oval — so the
+ * teller's "Take photo" button is the only shutter in either flow.
+ *
  * `cancelSession` (teller clicking "Reset session" or the room expiring) rips
  * down tracks and recorder timers and returns to the welcome screen.
  */
@@ -49,6 +56,9 @@ export function CustomerDisplayPage() {
   // being on its way in — the hint has to say so instead of "Starting the
   // camera…", and the next teller command clears it.
   const [cameraClosed, setCameraClosed] = useState(false)
+  // Which teller command opened the camera: the hint below promises a
+  // recording or a photo, and only the teller switches between them.
+  const [purpose, setPurpose] = useState<'liveness' | 'photo'>('liveness')
   // The last frame the camera saw, kept on the oval after it closes.
   const [snapshot, setSnapshot] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -197,10 +207,35 @@ export function CustomerDisplayPage() {
     switch (envelope.type) {
       case 'activateLiveness':
         setScreenState('liveness')
+        setPurpose('liveness')
         setCameraFailed(false)
         setNote('The teller is ready for your liveness check.')
         enableWebcam()
         break
+      case 'activateFaceCapture':
+        setScreenState('liveness')
+        setPurpose('photo')
+        setCameraFailed(false)
+        setNote('The teller is ready to take your photo.')
+        enableWebcam()
+        break
+      case 'capturePhoto': {
+        const dataUrl = captureSnapshot()
+        if (dataUrl === null) {
+          socketRef.current?.send({
+            type: 'error',
+            message: 'The camera is not ready to take a photo yet.',
+          })
+          break
+        }
+        socketRef.current?.send({ type: 'photo', dataUrl })
+        // Same bargain as a finished recording: the camera did its job, so it
+        // closes itself — and the still it was asked for stays on the oval.
+        setCameraClosed(true)
+        setNote('Your photo has been taken and sent to the teller.')
+        closeCamera()
+        break
+      }
       case 'startRecording':
         if (!webcamOnRef.current) {
           // The camera is still opening (permission prompt, or the command
@@ -224,6 +259,7 @@ export function CustomerDisplayPage() {
       setNote(null)
       setCameraClosed(false)
       setSnapshot(null)
+      setPurpose('liveness')
       break
       default:
         break
@@ -336,9 +372,13 @@ export function CustomerDisplayPage() {
             {recording
               ? `Look straight and blink slowly. ${countdown}s`
               : webcamOn
-                ? 'Hold still — the teller will start the check.'
+                ? purpose === 'photo'
+                  ? 'Look at the camera — the teller will take your photo.'
+                  : 'Hold still — the teller will start the check.'
                 : cameraClosed
-                  ? 'Your camera is off. The teller will start it again if you need to re-record.'
+                  ? purpose === 'photo'
+                    ? 'Your camera is off. The teller can open it again to take another photo.'
+                    : 'Your camera is off. The teller will start it again if you need to re-record.'
                   : cameraFailed
                     ? 'Camera unavailable — the teller has been notified.'
                     : 'Starting the camera…'}

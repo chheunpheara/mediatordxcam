@@ -1,6 +1,7 @@
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
 import { RemoteCameraFeed } from '../../features/onboarding/RemoteCameraFeed'
+import { RemoteFaceCapture } from '../../features/onboarding/RemoteFaceCapture'
 import { FieldCheckList } from './FieldCheckList'
 import { PostToCoreAction } from './PostToCoreAction'
 import { sectionsOf } from './sectionRows'
@@ -92,7 +93,12 @@ export function VerificationMethodPanel() {
         </div>
       )}
 
-      {chosen?.requiresCurrentFace ? <FaceCapturePanel /> : null}
+      {chosen?.requiresCurrentFace ? (
+        <>
+          <RemoteFaceCapture />
+          <FaceCapturePanel />
+        </>
+      ) : null}
 
       {chosen?.requiresLiveness ? <RemoteCameraFeed /> : null}
 

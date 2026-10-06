@@ -2,9 +2,10 @@
 
 The teller opens a session, hands `sessionId` to the customer display tab URL,
 and both connect through the WebSocket below. The teller sends commands
-(`activateLiveness`, `startRecording`, `cancelSession`); the customer streams
-frames (`frame` with a JPEG data URL) and its reports back. The relay never
-inspects a payload — it delivers to the *other* role in the room.
+(`activateLiveness`, `startRecording`, `activateFaceCapture`, `capturePhoto`,
+`cancelSession`); the customer streams frames (`frame` with a JPEG data URL),
+the still (`photo`) and its other reports back. The relay never inspects a
+payload — it delivers to the *other* role in the room.
 """
 
 from __future__ import annotations

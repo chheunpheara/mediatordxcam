@@ -186,6 +186,45 @@ describe('the six methods (§9, §10)', () => {
       await within(panel).findByText(/No fixed customer display is enabled yet/i),
     ).toBeInTheDocument()
   })
+
+  it('offers the customer display camera when the method needs the current face', async () => {
+    await renderWorkspace()
+    const panel = await methodPanel()
+    const { default: userEvent } = await import('@testing-library/user-event')
+
+    // A method that never mentions the customer's face never mentions the
+    // customer display either — the feed is a rendering of the requirements.
+    expect(within(panel).queryByText(/No fixed customer display is enabled yet/i)).toBeNull()
+
+    await userEvent.selectOptions(
+      await within(panel).findByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_face',
+    )
+
+    expect(
+      await within(panel).findByText(/No fixed customer display is enabled yet/i),
+    ).toBeInTheDocument()
+    // The teller's own camera and upload stay exactly where they were.
+    expect(within(panel).getByRole('button', { name: 'Use camera' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Upload photo' })).toBeInTheDocument()
+  })
+
+  it('keeps the face camera off the screen when the method wants liveness instead', async () => {
+    await renderWorkspace()
+    const panel = await methodPanel()
+    const { default: userEvent } = await import('@testing-library/user-event')
+
+    await userEvent.selectOptions(
+      await within(panel).findByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_idcard_liveness',
+    )
+
+    expect(
+      await within(panel).findByText(/No fixed customer display is enabled yet/i),
+    ).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: 'Use camera' })).toBeNull()
+    expect(within(panel).queryByRole('button', { name: 'Take photo' })).toBeNull()
+  })
 })
 
 describe('unavailable methods (§9)', () => {

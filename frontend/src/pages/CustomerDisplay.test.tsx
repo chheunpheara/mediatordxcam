@@ -246,6 +246,72 @@ describe('CustomerDisplayPage', () => {
     expect(await screen.findByText(/blink slowly/i)).toBeInTheDocument()
   })
 
+  it('opens the camera for a photo the teller takes and keeps the picture after it', async () => {
+    const camera = stubCamera()
+    stubRecording()
+    const { send, story } = await mountDisplay()
+
+    story.h?.({ type: 'activateFaceCapture' })
+    camera.open()
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'customerState', state: 'liveness' }),
+    )
+    expect(
+      await screen.findByText('Look at the camera — the teller will take your photo.'),
+    ).toBeInTheDocument()
+
+    // A frame worth taking, so the shutter has something to copy.
+    const video = screen.getByLabelText<HTMLVideoElement>('Customer camera preview')
+    Object.defineProperty(video, 'videoWidth', { value: 640, configurable: true })
+    Object.defineProperty(video, 'videoHeight', { value: 480, configurable: true })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/jpeg;base64,PHOTO',
+    )
+
+    story.h?.({ type: 'capturePhoto' })
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'photo', dataUrl: 'data:image/jpeg;base64,PHOTO' }),
+    )
+    // The shutter is the teller's: after the shot this camera closes itself
+    // the way it does after a recording, keeping the still on the oval.
+    expect(camera.stopTrack).toHaveBeenCalled()
+    expect(
+      await screen.findByText('Your photo has been taken and sent to the teller.'),
+    ).toBeInTheDocument()
+    expect(await screen.findByAltText('Your recorded preview')).toBeInTheDocument()
+    expect(
+      screen.getByText('Your camera is off. The teller can open it again to take another photo.'),
+    ).toBeInTheDocument()
+    expect(camera.getUserMedia).toHaveBeenCalledTimes(1)
+
+    // …and opens again only when the teller asks for another one.
+    story.h?.({ type: 'activateFaceCapture' })
+    camera.open()
+    await waitFor(() => expect(camera.getUserMedia).toHaveBeenCalledTimes(2))
+    expect(screen.queryByAltText('Your recorded preview')).toBeNull()
+    expect(
+      await screen.findByText('Look at the camera — the teller will take your photo.'),
+    ).toBeInTheDocument()
+  })
+
+  it('refuses to take a photo when the camera never opened', async () => {
+    const { send, story } = await mountDisplay()
+
+    story.h?.({ type: 'capturePhoto' })
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        type: 'error',
+        message: 'The camera is not ready to take a photo yet.',
+      }),
+    )
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'photo' }))
+  })
+
   it('keeps the last picture on the oval after the camera closes', async () => {
     const camera = stubCamera()
     const { finishRecording } = stubRecording()

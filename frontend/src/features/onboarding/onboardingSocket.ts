@@ -9,12 +9,15 @@ export type OnboardingCommand =
   | { type: 'activateLiveness' }
   | { type: 'startRecording' }
   | { type: 'cancelSession' }
+  | { type: 'activateFaceCapture' }
+  | { type: 'capturePhoto' }
 
 export type OnboardingReport =
   | { type: 'customerState'; state: CustomerUiState }
   | { type: 'frame'; dataUrl: string }
   | { type: 'recordingStarted' }
   | { type: 'recordingFinished'; livenessRef: string | null }
+  | { type: 'photo'; dataUrl: string }
   | { type: 'error'; message: string }
 
 export type CustomerUiState = 'welcome' | 'liveness' | 'recording'
