@@ -207,7 +207,7 @@ export function LivenessPanel() {
               <div className="liveness-stage">
                 <video
                   aria-label="Liveness camera preview"
-                  className="liveness-stage__video"
+                  className="liveness-stage__feed"
                   playsInline
                   ref={videoRef}
                 />

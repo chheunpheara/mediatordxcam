@@ -22,9 +22,11 @@ import { pickMimeType } from '../features/liveness/mimeTypes'
  * A denied camera is reported to the teller, not only shown here.
  *
  * The camera is closed again once the clip has been accepted: a monitor left
- * running after the check is a camera the customer was not told was on. It
- * reopens only on a teller command — `activateLiveness`, or the `startRecording`
- * that carries a re-record — which the held-start path above already handles.
+ * running after the check is a camera the customer was not told was on. The
+ * last picture the camera saw stays on the oval, so the customer can see what
+ * was just taken while the shutter is shut. It reopens only on a teller
+ * command — `activateLiveness`, or the `startRecording` that carries a
+ * re-record — which the held-start path above already handles.
  *
  * `cancelSession` (teller clicking "Reset session" or the room expiring) rips
  * down tracks and recorder timers and returns to the welcome screen.
@@ -47,6 +49,8 @@ export function CustomerDisplayPage() {
   // being on its way in — the hint has to say so instead of "Starting the
   // camera…", and the next teller command clears it.
   const [cameraClosed, setCameraClosed] = useState(false)
+  // The last frame the camera saw, kept on the oval after it closes.
+  const [snapshot, setSnapshot] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const socketRef = useRef<ReturnType<typeof openOnboardingSocket> | null>(null)
@@ -88,11 +92,29 @@ export function CustomerDisplayPage() {
     }
   }
 
+  /**
+   * The picture the camera is showing right now, as a JPEG. Taken before the
+   * tracks stop: once they do, the element has no frame left to copy.
+   */
+  const captureSnapshot = () => {
+    const video = videoRef.current
+    if (!video || !video.videoWidth || !video.videoHeight) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(video, 0, 0)
+    return canvas.toDataURL('image/jpeg', 0.86)
+  }
+
   /** Camera off. Only a completed check or a teller command leads here. */
   const closeCamera = () => {
+    const picture = captureSnapshot()
     stopFrames()
     stopStream()
     setWebcamOn(false)
+    setSnapshot(picture)
   }
 
   // Outgoing frames: at ~12 fps, canvas-JPEG of the live preview.
@@ -133,6 +155,8 @@ export function CustomerDisplayPage() {
     cameraRequestRef.current = true
     setCameraFailed(false)
     setCameraClosed(false)
+    // The live picture replaces the still from the last recording.
+    setSnapshot(null)
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'user' }, audio: false })
       .then((stream) => {
@@ -197,9 +221,10 @@ export function CustomerDisplayPage() {
         setWebcamOn(false)
         setRecording(false)
         setScreenState('welcome')
-        setNote(null)
-        setCameraClosed(false)
-        break
+      setNote(null)
+      setCameraClosed(false)
+      setSnapshot(null)
+      break
       default:
         break
     }
@@ -281,8 +306,7 @@ export function CustomerDisplayPage() {
 
   return (
     <main
-      className="bg-ink flex min-h-screen flex-col items-center justify-center p-6 text-center text-white"
-      style={{ background: '#0b0e13' }}
+      className="bg-white text-ink flex min-h-screen flex-col items-center justify-center p-3 text-center"
     >
       {screenState === 'welcome' ? (
         <section aria-live="polite">
@@ -294,24 +318,31 @@ export function CustomerDisplayPage() {
           <div className="liveness-stage">
             <video
               ref={videoRef}
-              className="liveness-stage__video"
+              className="liveness-stage__feed"
               playsInline
               aria-label="Customer camera preview"
             />
+            {snapshot ? (
+              <img
+                className="liveness-stage__feed"
+                src={snapshot}
+                alt="Your recorded preview"
+              />
+            ) : null}
             <div className="liveness-stage__dim" aria-hidden="true" />
             <div className="liveness-stage__oval" aria-hidden="true" />
-            <p className="liveness-stage__hint" role="status">
-                {recording
-                  ? `Look straight and blink slowly. ${countdown}s`
-                  : webcamOn
-                    ? 'Hold still — the teller will start the check.'
-                    : cameraClosed
-                      ? 'Your camera is off. The teller will start it again if you need to re-record.'
-                      : cameraFailed
-                        ? 'Camera unavailable — the teller has been notified.'
-                        : 'Starting the camera…'}
-            </p>
           </div>
+          <p className="liveness-stage__hint" role="status">
+            {recording
+              ? `Look straight and blink slowly. ${countdown}s`
+              : webcamOn
+                ? 'Hold still — the teller will start the check.'
+                : cameraClosed
+                  ? 'Your camera is off. The teller will start it again if you need to re-record.'
+                  : cameraFailed
+                    ? 'Camera unavailable — the teller has been notified.'
+                    : 'Starting the camera…'}
+          </p>
           <div className="mt-4 flex items-center justify-center gap-3">
             {recording ? (
               <p className="text-lg" role="status">
@@ -321,7 +352,7 @@ export function CustomerDisplayPage() {
           </div>
           {note ? (
             <p
-              className={`mt-3 text-sm ${cameraClosed ? 'text-positive font-medium' : 'text-white/70'}`}
+              className={`mt-3 text-sm ${cameraClosed ? 'text-positive font-medium' : 'text-ink-muted'}`}
               role="status"
             >
               {note}

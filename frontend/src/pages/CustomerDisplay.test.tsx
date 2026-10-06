@@ -245,4 +245,48 @@ describe('CustomerDisplayPage', () => {
     camera.open()
     expect(await screen.findByText(/blink slowly/i)).toBeInTheDocument()
   })
+
+  it('keeps the last picture on the oval after the camera closes', async () => {
+    const camera = stubCamera()
+    const { finishRecording } = stubRecording()
+    const { send, story } = await mountDisplay()
+
+    story.h?.({ type: 'activateLiveness' })
+    camera.open()
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'customerState', state: 'liveness' }),
+    )
+
+    // A frame the camera is actually showing, so there is one to keep.
+    const video = screen.getByLabelText<HTMLVideoElement>('Customer camera preview')
+    Object.defineProperty(video, 'videoWidth', { value: 640, configurable: true })
+    Object.defineProperty(video, 'videoHeight', { value: 480, configurable: true })
+    const drawImage = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/jpeg;base64,SNAPSHOT',
+    )
+
+    story.h?.({ type: 'startRecording' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'recordingStarted' }))
+    finishRecording()
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'recordingFinished', livenessRef: 'liv_1' }),
+    )
+
+    const picture = await screen.findByAltText('Your recorded preview')
+    expect(picture).toHaveAttribute('src', 'data:image/jpeg;base64,SNAPSHOT')
+    expect(drawImage).toHaveBeenCalledWith(video, 0, 0)
+
+    // The still is the last thing this camera saw, so it must be copied
+    // before the tracks stop — afterwards there is nothing left to copy.
+    expect(camera.stopTrack).toHaveBeenCalled()
+
+    // A re-record drops the still for the live picture again.
+    story.h?.({ type: 'startRecording' })
+    await waitFor(() => expect(camera.getUserMedia).toHaveBeenCalledTimes(2))
+    expect(screen.queryByAltText('Your recorded preview')).toBeNull()
+  })
 })
