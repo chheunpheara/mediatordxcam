@@ -21,6 +21,11 @@ import { pickMimeType } from '../features/liveness/mimeTypes'
  * the moment the stream lands, so no command needs a click to take effect.
  * A denied camera is reported to the teller, not only shown here.
  *
+ * The camera is closed again once the clip has been accepted: a monitor left
+ * running after the check is a camera the customer was not told was on. It
+ * reopens only on a teller command — `activateLiveness`, or the `startRecording`
+ * that carries a re-record — which the held-start path above already handles.
+ *
  * `cancelSession` (teller clicking "Reset session" or the room expiring) rips
  * down tracks and recorder timers and returns to the welcome screen.
  */
@@ -38,6 +43,10 @@ export function CustomerDisplayPage() {
   const [countdown, setCountdown] = useState(RECORD_SECONDS)
   const [note, setNote] = useState<string | null>(null)
   const [cameraFailed, setCameraFailed] = useState(false)
+  // The clip was accepted, so the camera was closed on purpose rather than
+  // being on its way in — the hint has to say so instead of "Starting the
+  // camera…", and the next teller command clears it.
+  const [cameraClosed, setCameraClosed] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const socketRef = useRef<ReturnType<typeof openOnboardingSocket> | null>(null)
@@ -79,6 +88,13 @@ export function CustomerDisplayPage() {
     }
   }
 
+  /** Camera off. Only a completed check or a teller command leads here. */
+  const closeCamera = () => {
+    stopFrames()
+    stopStream()
+    setWebcamOn(false)
+  }
+
   // Outgoing frames: at ~12 fps, canvas-JPEG of the live preview.
   const startFrameStream = () => {
     frameTimer.current = window.setInterval(() => {
@@ -116,6 +132,7 @@ export function CustomerDisplayPage() {
     }
     cameraRequestRef.current = true
     setCameraFailed(false)
+    setCameraClosed(false)
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'user' }, audio: false })
       .then((stream) => {
@@ -181,6 +198,7 @@ export function CustomerDisplayPage() {
         setRecording(false)
         setScreenState('welcome')
         setNote(null)
+        setCameraClosed(false)
         break
       default:
         break
@@ -238,7 +256,11 @@ export function CustomerDisplayPage() {
         type: 'recordingFinished',
         livenessRef: typeof json.livenessRef === 'string' ? json.livenessRef : null,
       })
-      setNote('Check recorded and sent for review.')
+      setNote('Liveness recording complete. Your video was sent to the teller.')
+      // Accepted: the camera has done its job. Off it goes, and the next
+      // `startRecording` reopens it through the held-start path above.
+      setCameraClosed(true)
+      closeCamera()
     } catch (cause) {
       setNote(cause instanceof Error ? cause.message : 'Liveness upload failed.')
       socketRef.current?.send({ type: 'error', message: String(cause) })
@@ -279,13 +301,15 @@ export function CustomerDisplayPage() {
             <div className="liveness-stage__dim" aria-hidden="true" />
             <div className="liveness-stage__oval" aria-hidden="true" />
             <p className="liveness-stage__hint" role="status">
-              {recording
-                ? `Look straight and blink slowly. ${countdown}s`
-                : webcamOn
-                  ? 'Hold still — the teller will start the check.'
-                  : cameraFailed
-                    ? 'Camera unavailable — the teller has been notified.'
-                    : 'Starting the camera…'}
+                {recording
+                  ? `Look straight and blink slowly. ${countdown}s`
+                  : webcamOn
+                    ? 'Hold still — the teller will start the check.'
+                    : cameraClosed
+                      ? 'Your camera is off. The teller will start it again if you need to re-record.'
+                      : cameraFailed
+                        ? 'Camera unavailable — the teller has been notified.'
+                        : 'Starting the camera…'}
             </p>
           </div>
           <div className="mt-4 flex items-center justify-center gap-3">
@@ -295,7 +319,14 @@ export function CustomerDisplayPage() {
               </p>
             ) : null}
           </div>
-          {note ? <p className="mt-3 text-sm text-white/70">{note}</p> : null}
+          {note ? (
+            <p
+              className={`mt-3 text-sm ${cameraClosed ? 'text-positive font-medium' : 'text-white/70'}`}
+              role="status"
+            >
+              {note}
+            </p>
+          ) : null}
         </section>
       )}
     </main>

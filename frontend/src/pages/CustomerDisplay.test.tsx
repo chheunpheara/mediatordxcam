@@ -72,6 +72,7 @@ function stubCamera() {
 /** The recording half: a recorder double and the broker upload it feeds. */
 function stubRecording() {
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  const recorders: Array<() => void> = []
   vi.stubGlobal(
     'MediaRecorder',
     class {
@@ -81,6 +82,10 @@ function stubRecording() {
       state = 'inactive'
       ondataavailable: ((event: { data: Blob }) => void) | null = null
       onstop: (() => void) | null = null
+      constructor() {
+        // The 3-second loop, on demand: tests end long before it elapses.
+        recorders.push(() => this.stop())
+      }
       start(): void {
         this.state = 'recording'
       }
@@ -101,6 +106,7 @@ function stubRecording() {
       ),
     ),
   )
+  return { finishRecording: () => recorders.at(-1)?.() }
 }
 
 describe('CustomerDisplayPage', () => {
@@ -195,5 +201,48 @@ describe('CustomerDisplayPage', () => {
     expect(await screen.findByText('Welcome')).toBeInTheDocument()
     expect(camera.stopTrack).toHaveBeenCalled()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('closes the camera once the clip is accepted and reopens it for a re-record', async () => {
+    const camera = stubCamera()
+    const { finishRecording } = stubRecording()
+    const { send, story } = await mountDisplay()
+
+    story.h?.({ type: 'activateLiveness' })
+    camera.open()
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'customerState', state: 'liveness' }),
+    )
+    story.h?.({ type: 'startRecording' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'recordingStarted' }))
+
+    finishRecording() // the loop ends, the clip uploads, the teller gets it
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'recordingFinished', livenessRef: 'liv_1' }),
+    )
+    expect(camera.stopTrack).toHaveBeenCalled()
+    expect(
+      await screen.findByText(
+        'Liveness recording complete. Your video was sent to the teller.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Your camera is off. The teller will start it again if you need to re-record.'),
+    ).toBeInTheDocument()
+    expect(camera.getUserMedia).toHaveBeenCalledTimes(1)
+
+    // The teller's "Re-record" is the only thing that brings the camera back.
+    story.h?.({ type: 'startRecording' })
+
+    await waitFor(() => expect(camera.getUserMedia).toHaveBeenCalledTimes(2))
+    expect(
+      screen.queryByText(
+        'Your camera is off. The teller will start it again if you need to re-record.',
+      ),
+    ).toBeNull()
+
+    camera.open()
+    expect(await screen.findByText(/blink slowly/i)).toBeInTheDocument()
   })
 })

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { openOnboardingSocket } from '../features/onboarding/onboardingSocket'
 import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
+import { useLiveFrame } from '../features/onboarding/useLiveFrame'
 
 /**
  * Screen A (teller dashboard).
@@ -15,7 +16,7 @@ import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket
 export function TellerDashboard() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [liveFrame, setLiveFrame] = useState<string | null>(null)
+  const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
   const [recordingBusy, setRecordingBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const socketRef = useRef<ReturnType<typeof openOnboardingSocket> | null>(null)
@@ -51,7 +52,7 @@ export function TellerDashboard() {
     const handle = (env: OnboardingEnvelope) => {
       switch (env.type) {
         case 'frame':
-          setLiveFrame(env.dataUrl)
+          acceptFrame(env.dataUrl)
           break
         case 'recordingStarted':
           setRecordingBusy(true)
@@ -72,7 +73,7 @@ export function TellerDashboard() {
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [sessionId])
+  }, [sessionId, acceptFrame])
 
   if (error && !sessionId) {
     return (
@@ -101,14 +102,17 @@ export function TellerDashboard() {
               </a>
             </p>
             <p className="mt-1 text-sm text-neutral-500">
-              Open this on the customer-facing monitor, then click "Enable Webcam" there before
-              starting the liveness check.
+              Open this on the customer-facing monitor. It takes no clicks: the webcam opens
+              when you activate it and closes again once a recording has been sent.
             </p>
 
-            <div className="mt-4">
-              {liveFrame ? (
-                <img alt="Customer camera" className="max-h-72 w-full rounded-md object-contain" src={liveFrame} />
-              ) : (
+            <div className="mt-4 bg-transparent">
+              <canvas
+                aria-label="Customer camera"
+                className="aspect-[4/3] max-h-72 w-full rounded-md bg-transparent"
+                ref={canvasRef}
+              />
+              {hasFrame ? null : (
                 <p className="text-sm text-neutral-500">Waiting for the customer's camera…</p>
               )}
             </div>

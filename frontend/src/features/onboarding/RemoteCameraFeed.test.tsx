@@ -56,6 +56,7 @@ async function mountWithStory() {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   openOnboardingSocket.mockReset()
   liveness.adopt.mockReset()
   liveness.livenessRef = null
@@ -66,6 +67,51 @@ function player(): HTMLVideoElement {
   const video = document.querySelector('video')
   if (!video) throw new Error('no recorded clip on screen')
   return video
+}
+
+/**
+ * The frame decoder double. jsdom never finishes decoding, so the test says
+ * when it does — which is exactly what makes "a frame reaches the screen only
+ * once it has decoded" observable.
+ */
+function stubFrameDecoder() {
+  const created: Array<{ onload: (() => void) | null; fire: () => void }> = []
+  vi.stubGlobal(
+    'Image',
+    class {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      private value = ''
+      constructor() {
+        created.push(this)
+      }
+      get src() {
+        return this.value
+      }
+      set src(next: string) {
+        this.value = next
+      }
+      fire() {
+        this.onload?.()
+      }
+    },
+  )
+  return { finishDecoding: () => created.at(-1)?.fire() }
+}
+
+/**
+ * jsdom has no 2d context, so the draws are recorded here instead — which is
+ * also what makes the no-blink guarantee testable: frames may only ever be
+ * *added* to the canvas, never taken off it.
+ */
+function stubCanvas() {
+  const draws: string[] = []
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage: (image: { src: string }) => {
+      draws.push(image.src)
+    },
+  } as unknown as CanvasRenderingContext2D)
+  return { draws }
 }
 
 describe('RemoteCameraFeed', () => {
@@ -88,7 +134,9 @@ describe('RemoteCameraFeed', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders incoming customer frames as the live feed', async () => {
+  it('draws incoming customer frames onto the preview canvas', async () => {
+    const decoder = stubFrameDecoder()
+    const canvas = stubCanvas()
     stubSettings(SETTINGS)
     const send = vi.fn()
     const story: { h: ((envelope: OnboardingEnvelope) => void) | null } = { h: null }
@@ -103,9 +151,54 @@ describe('RemoteCameraFeed', () => {
     await waitFor(() => expect(story.h).not.toBeNull())
 
     story.h?.({ type: 'frame', dataUrl: 'data:image/jpeg;base64,/9j/4AAQ' })
+    expect(screen.getByText(/Waiting for the customer's webcam frames…/)).toBeInTheDocument()
 
-    const image = await screen.findByAltText('Customer liveness feed')
-    expect(image).toHaveAttribute('src', 'data:image/jpeg;base64,/9j/4AAQ')
+    decoder.finishDecoding()
+
+    await waitFor(() =>
+      expect(screen.queryByText(/Waiting for the customer's webcam frames…/)).toBeNull(),
+    )
+    expect(canvas.draws).toEqual(['data:image/jpeg;base64,/9j/4AAQ'])
+    expect(screen.getByLabelText('Customer liveness feed')).toBeInTheDocument()
+  })
+
+  it('keeps the frame on the canvas until the next one has decoded', async () => {
+    const decoder = stubFrameDecoder()
+    const canvas = stubCanvas()
+    const { story } = await mountWithStory()
+
+    story.h?.({ type: 'frame', dataUrl: 'data:image/jpeg;base64,AAA' })
+
+    // Nothing has been decoded, so nothing has been drawn — and nothing has
+    // been taken off the canvas either. That is the whole anti-blink rule.
+    expect(canvas.draws).toEqual([])
+    expect(screen.getByText(/Waiting for the customer's webcam frames…/)).toBeInTheDocument()
+
+    decoder.finishDecoding()
+    await waitFor(() => expect(canvas.draws).toEqual(['data:image/jpeg;base64,AAA']))
+    expect(screen.queryByText(/Waiting for the customer's webcam frames…/)).toBeNull()
+
+    story.h?.({ type: 'frame', dataUrl: 'data:image/jpeg;base64,BBB' })
+
+    expect(canvas.draws).toEqual(['data:image/jpeg;base64,AAA'])
+
+    decoder.finishDecoding()
+    await waitFor(() =>
+      expect(canvas.draws).toEqual(['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB']),
+    )
+  })
+
+  it('does not ask for the camera when a recording already exists', async () => {
+    liveness.livenessRef = 'liv_9'
+    const { send, story } = await mountWithStory()
+
+    expect(send).not.toHaveBeenCalled()
+
+    // A monitor tab that reloads after the check: it must find the camera
+    // still closed. Reopening is the "Re-record" button's job.
+    story.h?.({ type: 'peerJoined' })
+
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('opens no socket when the fixed display is disabled', async () => {
@@ -209,11 +302,11 @@ describe('RemoteCameraFeed', () => {
     fireEvent.error(player())
     expect(await screen.findByRole('alert')).toHaveTextContent(/has expired/i)
 
+    // The next clip arrives the way one really does: its handle, adopted.
     liveness.livenessRef = 'liv_fresh'
-    story.h?.({ type: 'frame', dataUrl: 'data:image/jpeg;base64,/9j/4AAQ' })
+    story.h?.({ type: 'recordingFinished', livenessRef: 'liv_fresh' })
 
-    expect(await screen.findByAltText('Customer liveness feed')).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(player()).toHaveAttribute('src', artifactUrl('liv_fresh'))
   })
 })

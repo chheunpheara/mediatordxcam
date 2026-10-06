@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { openOnboardingSocket } from './onboardingSocket'
 import type { OnboardingEnvelope } from './onboardingSocket'
+import { useLiveFrame } from './useLiveFrame'
 import { useLiveness } from '../liveness/LivenessContext'
 import { artifactUrl, fetchLivenessPageSettings } from '../../lib/api'
 
@@ -22,12 +23,15 @@ import { artifactUrl, fetchLivenessPageSettings } from '../../lib/api'
  *
  * `peerJoined` re-sends the activation command, because a monitor tab that
  * connects *after* the method was chosen would otherwise never be told to
- * open its camera.
+ * open its camera — but only while no clip exists. Once a recording has been
+ * accepted the customer's camera is meant to stay closed (it closes itself on
+ * success), so a monitor tab that reloads must not be told to film again;
+ * reopening it is what "Re-record" is for.
  */
 export function RemoteCameraFeed() {
   const { adopt, livenessRef } = useLiveness()
   const [enabled, setEnabled] = useState<boolean | null>(null)
-  const [frameUrl, setFrameUrl] = useState<string | null>(null)
+  const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
   const [recording, setRecording] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [noteIsError, setNoteIsError] = useState(false)
@@ -40,12 +44,25 @@ export function RemoteCameraFeed() {
   const socketRef = useRef<ReturnType<typeof openOnboardingSocket> | null>(null)
   // The socket handler is written once; keep it on the latest adopt.
   const adoptRef = useRef(adopt)
+  // …and on the latest handle, so the activation guard below reads a clip
+  // that was recorded after this panel mounted.
+  const livenessRefRef = useRef(livenessRef)
   useEffect(() => {
     adoptRef.current = adopt
-  }, [adopt])
+    livenessRefRef.current = livenessRef
+  }, [adopt, livenessRef])
 
   useEffect(() => {
     let done = false
+
+    // Ask the customer display to film — but only while there is no clip to
+    // replay. After a successful recording the camera is closed on purpose,
+    // and neither this panel's mount nor a monitor tab reloading behind it
+    // may undo that; "Re-record" is what opens it again.
+    const askForCamera = () => {
+      if (livenessRefRef.current !== null) return
+      socketRef.current?.send({ type: 'activateLiveness' })
+    }
 
     fetchLivenessPageSettings()
       .then((settings) => {
@@ -56,8 +73,7 @@ export function RemoteCameraFeed() {
           handleTellerEvent(envelope)
         })
         socketRef.current = socket
-        // Ask the customer display to show the webcam automatically.
-        socket.send({ type: 'activateLiveness' })
+        askForCamera()
       })
       .catch(() => setEnabled(false))
     return () => {
@@ -69,12 +85,12 @@ export function RemoteCameraFeed() {
     function handleTellerEvent(envelope: OnboardingEnvelope) {
       switch (envelope.type) {
         case 'frame':
-          setFrameUrl(envelope.dataUrl)
+          acceptFrame(envelope.dataUrl)
           break
         case 'peerJoined':
           // The customer tab (re)connected: it has not seen the activation
           // command this panel sent on mount, so send it again.
-          socketRef.current?.send({ type: 'activateLiveness' })
+          askForCamera()
           break
         case 'recordingStarted':
           setRecording(true)
@@ -101,7 +117,7 @@ export function RemoteCameraFeed() {
           break
       }
     }
-  }, [])
+  }, [acceptFrame])
 
   if (enabled === null) {
     return (
@@ -124,7 +140,7 @@ export function RemoteCameraFeed() {
       {livenessRef !== null ? (
         <section
           aria-label="Recorded liveness clip"
-          className="border-border bg-surface-sunken mb-3 rounded-lg border p-3"
+          className="border-border mb-3 rounded-lg border p-3"
           role="region"
         >
           <p className="text-ink text-xs font-semibold">Liveness check</p>
@@ -135,7 +151,7 @@ export function RemoteCameraFeed() {
           ) : (
             <video
               aria-label="Recorded liveness clip"
-              className="mt-2 max-h-72 w-full rounded-lg"
+              className="mt-2 max-h-72 w-full rounded-lg bg-transparent"
               controls
               onError={() => setFailedHandle(livenessRef)}
               playsInline
@@ -146,11 +162,16 @@ export function RemoteCameraFeed() {
           <p className="text-ink-subtle mt-1 text-xs">A liveness video was recorded.</p>
         </section>
       ) : null}
-      {frameUrl ? (
-        <img alt="Customer liveness feed" className="max-h-72 w-full rounded-lg" src={frameUrl} />
-      ) : (
-        <p className="text-ink-subtle text-xs">Waiting for the customer's webcam frames…</p>
-      )}
+      <div className="bg-transparent">
+        <canvas
+          aria-label="Customer liveness feed"
+          className="aspect-[4/3] max-h-72 w-full rounded-lg bg-transparent"
+          ref={canvasRef}
+        />
+        {hasFrame ? null : (
+          <p className="text-ink-subtle text-xs">Waiting for the customer's webcam frames…</p>
+        )}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <button
           className="btn-primary px-4 py-2 text-sm font-medium disabled:opacity-50"
