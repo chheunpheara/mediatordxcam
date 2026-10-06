@@ -18,6 +18,7 @@ from fastapi import Depends, Request
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.domain.auth import ALL_PERMISSIONS, Role, User, UserStatus
+from app.infrastructure.liveness_settings_store import LivenessSettingsStore
 from app.integrations.camdx.mock.ocr import MockOcrProvider
 from app.integrations.camdx.ocr import OcrProvider
 from app.services.artifacts import TempArtifactStore
@@ -245,6 +246,19 @@ def integration_service_provider(request: Request, settings: SettingsDep) -> Int
 
 
 IntegrationServiceDep = Annotated[IntegrationService, Depends(integration_service_provider)]
+
+
+def liveness_settings_provider(request: Request, settings: SettingsDep) -> LivenessSettingsStore:
+    cached: LivenessSettingsStore | None = getattr(
+        request.app.state, "liveness_settings_store", None
+    )
+    if cached is None:
+        cached = LivenessSettingsStore(settings.database_url or "")
+        request.app.state.liveness_settings_store = cached
+    return cached
+
+
+LivenessSettingsDep = Annotated[LivenessSettingsStore, Depends(liveness_settings_provider)]
 
 
 def record_service_provider(request: Request, settings: SettingsDep) -> RecordService:

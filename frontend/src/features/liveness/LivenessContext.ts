@@ -9,6 +9,12 @@ export interface LivenessValue {
   /** User-facing error; already renderable as-is. */
   readonly error: string | null
   readonly capture: (video: File | Blob) => Promise<void>
+  /**
+   * Adopt a handle the customer display already verified server-side (the
+   * remote dual-screen flow uploads from the other tab and hands the ref
+   * back over the relay). Same contract as a local capture's success.
+   */
+  readonly adopt: (livenessRef: string) => void
   readonly reset: () => void
 }
 

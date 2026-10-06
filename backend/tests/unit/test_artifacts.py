@@ -153,6 +153,10 @@ def test_delete_is_idempotent(store: TempArtifactStore) -> None:
     [
         (b"\xff\xd8\xff\xe0" + b"\x00" * 32, "image/jpeg"),
         (b"\x89PNG\r\n\x1a\n" + b"\x00" * 32, "image/png"),
+        # Phase 7's recordings: a stored clip must come back identifiable as
+        # video, or the artefact route has nothing to serve the teller.
+        (b"\x1a\x45\xdf\xa3" + b"\x00" * 32, "video/webm"),
+        (b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32, "video/mp4"),
         (b"<html><body>hi</body></html>", "application/octet-stream"),
         (b"GIF89a" + b"\x00" * 32, "application/octet-stream"),
         (b"", "application/octet-stream"),

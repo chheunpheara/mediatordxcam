@@ -123,6 +123,9 @@ def test_reports_the_real_type_not_the_claimed_one() -> None:
         (encode_webp(blank_card()), "image/webp"),
         (b"GIF89a" + b"\x00" * 64, "image/gif"),
         (b"BM" + b"\x00" * 64, "image/bmp"),
+        # Phase 7's liveness recording: identified, and never accepted as a card.
+        (b"\x1a\x45\xdf\xa3" + b"\x00" * 64, "video/webm"),
+        (b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32, "video/mp4"),
         (b"%PDF-1.7\n%", None),
         (b"\x00\x01\x02\x03", None),
     ],
@@ -147,6 +150,15 @@ def test_a_renamed_file_is_rejected_as_the_wrong_type(blob: bytes, declared: str
 @pytest.mark.parametrize("blob", [not_an_image(), b"", b"\x00" * 32, b"%PDF-1.7 not an image"])
 def test_unrecognisable_bytes_are_reported_as_unreadable(blob: bytes) -> None:
     assert rejection(blob) is ErrorCode.IMAGE_UNREADABLE
+
+
+def test_a_recording_is_still_refused_as_a_document() -> None:
+    """Knowing a container's magic bytes must not widen §7's accept list.
+
+    A webm renamed to `.jpg` now sniffs as what it is, so it is rejected as the
+    wrong type — the more precise of the two answers — never as a card to decode.
+    """
+    assert rejection(b"\x1a\x45\xdf\xa3" + b"\x00" * 64) is ErrorCode.UNSUPPORTED_IMAGE_TYPE
 
 
 def test_a_truncated_jpeg_header_is_unreadable() -> None:

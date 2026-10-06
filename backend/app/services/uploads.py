@@ -34,6 +34,13 @@ PNG: Final = "image/png"
 WEBP: Final = "image/webp"
 ACCEPTED_MEDIA_TYPES: Final = frozenset({JPEG, PNG, WEBP})
 
+#: Liveness recordings the broker stores (Phase 7). These are *never* uploadable
+#: as documents — §7's accept list above stays images only — they are listed here
+#: so the artefact read path can serve a stored clip back to the teller.
+VIDEO_WEBM: Final = "video/webm"
+VIDEO_MP4: Final = "video/mp4"
+SERVABLE_MEDIA_TYPES: Final = ACCEPTED_MEDIA_TYPES | {VIDEO_WEBM, VIDEO_MP4}
+
 #: Refuse to even look at a header larger than this. A legitimate 10 MB phone
 #: photo is tens of kilobytes of header, so this only ever trips on a hostile or
 #: malformed file, and it bounds the marker walk below.
@@ -58,6 +65,12 @@ _WEBP_FORM: Final = b"WEBP"
 
 #: WebP payload FourCCs, mapped to how their canvas dimensions are encoded.
 _WEBP_CHUNKS: Final = frozenset({b"VP8 ", b"VP8L", b"VP8X"})
+
+#: The EBML master-element id that opens every WebM recording.
+_EBML: Final = b"\x1a\x45\xdf\xa3"
+
+#: ISO-BMFF container brand: the box *type* at offset 4, past the box size.
+_FTYP: Final = b"ftyp"
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,14 +155,19 @@ def validate_image_upload(
 
 
 def sniff_media_type(data: bytes) -> str | None:
-    """Identify an image format from its magic bytes.
+    """Identify a stored format from its magic bytes.
 
     Recognises more formats than are accepted, purely so an unsupported-but-real
-    image can be reported as the wrong file type instead of a corrupt one. Returns
-    None when the bytes are not any image we can recognise.
+    file can be reported as the wrong type instead of a corrupt one — and, for the
+    artefact read path, so a stored liveness recording can be served back as the
+    video it is. Returns None when the bytes are not any format we recognise.
     """
     if _is_webp(data):
         return WEBP
+    if _is_webm(data):
+        return VIDEO_WEBM
+    if _is_mp4(data):
+        return VIDEO_MP4
     for signature, media_type in _SIGNATURES:
         if data.startswith(signature):
             return media_type
@@ -184,6 +202,20 @@ def _is_png(data: bytes) -> bool:
 def _is_webp(data: bytes) -> bool:
     """WebP is `RIFF....WEBP`: the form type is 8 bytes in, past the chunk size."""
     return len(data) >= 12 and data[:4] == _RIFF and data[8:12] == _WEBP_FORM
+
+
+def _is_webm(data: bytes) -> bool:
+    """WebM is an EBML document; the master element's id opens every recording."""
+    return data.startswith(_EBML)
+
+
+def _is_mp4(data: bytes) -> bool:
+    """ISO-BMFF: a 4-byte box size, then the `ftyp` box type at offset 4.
+
+    The size itself is never read — any value is legal — so only the FourCC
+    identifies the container, which is what every recorder writes first.
+    """
+    return len(data) >= 8 and data[4:8] == _FTYP
 
 
 def _read_png_header(data: bytes) -> ImageHeader | None:

@@ -42,6 +42,7 @@ class ErrorCode(StrEnum):
     INVALID_REQUEST = "INVALID_REQUEST"
     NOT_FOUND = "NOT_FOUND"
     UNSUPPORTED_IMAGE_TYPE = "UNSUPPORTED_IMAGE_TYPE"
+    UNSUPPORTED_VIDEO_TYPE = "UNSUPPORTED_VIDEO_TYPE"
     IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE"
     IMAGE_UNREADABLE = "IMAGE_UNREADABLE"
     IMAGE_TOO_LOW_RESOLUTION = "IMAGE_TOO_LOW_RESOLUTION"
@@ -97,6 +98,7 @@ USER_MESSAGES: dict[ErrorCode, str] = {
     # picker must not then be told a different thing by the server — and neither
     # may name a format we do not accept.
     ErrorCode.UNSUPPORTED_IMAGE_TYPE: "Please upload a JPG, PNG or WebP image.",
+    ErrorCode.UNSUPPORTED_VIDEO_TYPE: "Please upload a WebM or MP4 video.",
     ErrorCode.IMAGE_TOO_LARGE: "File is too large. Maximum size is 10 MB.",
     ErrorCode.IMAGE_UNREADABLE: "File is corrupted or cannot be read as an image.",
     # Placeholders are filled in by the caller from the configured limits, so this
@@ -145,6 +147,7 @@ DEFAULT_STATUS: dict[ErrorCode, int] = {
     ErrorCode.INVALID_REQUEST: status.HTTP_400_BAD_REQUEST,
     ErrorCode.NOT_FOUND: status.HTTP_404_NOT_FOUND,
     ErrorCode.UNSUPPORTED_IMAGE_TYPE: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    ErrorCode.UNSUPPORTED_VIDEO_TYPE: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
     ErrorCode.IMAGE_TOO_LARGE: status.HTTP_413_CONTENT_TOO_LARGE,
     ErrorCode.IMAGE_UNREADABLE: status.HTTP_400_BAD_REQUEST,
     ErrorCode.IMAGE_TOO_LOW_RESOLUTION: status.HTTP_422_UNPROCESSABLE_CONTENT,

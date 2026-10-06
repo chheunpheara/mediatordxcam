@@ -69,6 +69,16 @@ export function LivenessProvider({ children }: { children: React.ReactNode }) {
     [result],
   )
 
+  const adopt = useCallback(
+    (ref: string) => {
+      setLivenessRef(ref)
+      setOwnedBy(result?.documentRef ?? null)
+      setError(null)
+      setState('ready')
+    },
+    [result],
+  )
+
   const reset = useCallback(() => {
     setState('idle')
     setLivenessRef(null)
@@ -77,8 +87,8 @@ export function LivenessProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = useMemo<LivenessValue>(
-    () => ({ state, livenessRef: exposedLivenessRef, error, capture, reset }),
-    [state, exposedLivenessRef, error, capture, reset],
+    () => ({ state, livenessRef: exposedLivenessRef, error, capture, adopt, reset }),
+    [state, exposedLivenessRef, error, capture, adopt, reset],
   )
 
   return <LivenessContext value={value}>{children}</LivenessContext>

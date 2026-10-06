@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { routes } from '../app/routes'
 import { DocumentColumn } from '../components/verification/DocumentColumn'
 import { ExportAction } from '../components/verification/ExportAction'
+import { LivenessPageAction } from '../components/verification/LivenessPageAction'
 import { PostSettingsAction } from '../components/verification/PostSettingsAction'
 import { FaceColumn } from '../components/verification/FaceColumn'
 import { IdentityForm } from '../components/verification/IdentityForm'
@@ -117,6 +118,7 @@ function Workspace() {
               ← Back to upload
             </Link>
             <PostSettingsAction />
+            <LivenessPageAction />
             <ExportAction />
           </div>
         </div>

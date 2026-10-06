@@ -1,6 +1,6 @@
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
-import { LivenessPanel } from '../../features/liveness/LivenessPanel'
+import { RemoteCameraFeed } from '../../features/onboarding/RemoteCameraFeed'
 import { FieldCheckList } from './FieldCheckList'
 import { PostToCoreAction } from './PostToCoreAction'
 import { sectionsOf } from './sectionRows'
@@ -94,7 +94,7 @@ export function VerificationMethodPanel() {
 
       {chosen?.requiresCurrentFace ? <FaceCapturePanel /> : null}
 
-      {chosen?.requiresLiveness ? <LivenessPanel /> : null}
+      {chosen?.requiresLiveness ? <RemoteCameraFeed /> : null}
 
       <button
         className="btn-primary mt-4 w-full"

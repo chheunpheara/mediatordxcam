@@ -100,10 +100,12 @@ class TestVerificationMethods:
         assert by_method["verify_user_info"]["requiresLiveness"] is False
 
     async def test_api_1_is_offered_and_the_rest_explain_themselves(self, client) -> None:
-        """Pending methods stay listed and say why they cannot run.
+        """Methods that cannot run stay listed and say why.
 
         §9 requires all six on screen; §10 needs each to be actionable or to
-        explain itself. Hiding the pending ones would satisfy neither.
+        explain itself. Hiding the pending ones would satisfy neither — and now
+        that Phase 7 supplies liveness, API 4 has crossed over to the runnable
+        side, which this asserts as deliberately as it once asserted the reverse.
         """
         response = await client.get(METHODS)
 
@@ -114,11 +116,12 @@ class TestVerificationMethods:
         for now_available in (
             "verify_user_info_face",
             "verify_user_info_idcard_face",
+            "verify_user_info_idcard_liveness",
         ):
             assert by_method[now_available]["available"] is True
             assert by_method[now_available]["unavailableReason"] is None
 
-        for pending in ("verify_user_info_idcard_liveness",):
+        for pending in ("khmer_id_card_ocr", "passport_ocr"):
             assert by_method[pending]["available"] is False
             assert by_method[pending]["unavailableReason"]
 

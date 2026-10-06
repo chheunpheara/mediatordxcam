@@ -95,13 +95,15 @@ def test_an_empty_reference_does_not_count_as_supplied() -> None:
     )
 
 
-def test_api_4_can_never_be_satisfied_here() -> None:
-    """`:1355`: API 4 must not execute without liveness state.
+def test_api_4_is_satisfiable_now_that_phase_7_has_landed() -> None:
+    """Phase 7 supplies the liveness input, so API 4's method card can run.
 
-    Phase 7 introduces liveness, so no combination of today's inputs satisfies
-    API 4. `available: false` on its method card is the honest answer.
+    The gate itself is unchanged — without a liveness reference it still
+    refuses (see `test_each_method_names_its_own_extra_input`) — what is new is
+    that an input now exists to refuse *for*, so `available: false` would be a
+    lie the teller cannot act on.
     """
-    assert not requirements_for(VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS).is_satisfiable
+    assert requirements_for(VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS).is_satisfiable
     assert not missing(VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS)
 
 
@@ -117,6 +119,7 @@ def test_currently_runnable_methods() -> None:
         VerificationMethod.VERIFY_USER_INFO,
         VerificationMethod.VERIFY_USER_INFO_FACE,
         VerificationMethod.VERIFY_USER_INFO_IDCARD_FACE,
+        VerificationMethod.VERIFY_USER_INFO_IDCARD_LIVENESS,
     }
 
 

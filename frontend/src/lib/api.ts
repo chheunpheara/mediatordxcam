@@ -679,6 +679,25 @@ export async function saveIntegrationSettings(
   return body.settings
 }
 
+/** The fixed liveness page: enabled, stable session token, and mirrored URL. */
+export interface LivenessPageSettings {
+  readonly enabled: boolean
+  readonly sessionId: string
+}
+
+/** `GET /api/v1/onboarding/liveness-page` — current fixed display location. */
+export async function fetchLivenessPageSettings(): Promise<LivenessPageSettings> {
+  return requestJson<LivenessPageSettings>('/api/v1/onboarding/liveness-page')
+}
+
+/** `PUT /api/v1/onboarding/liveness-page` — admin manages enable/disable. */
+export async function saveLivenessPageSettings(enabled: boolean): Promise<LivenessPageSettings> {
+  return requestJson<LivenessPageSettings>(
+    '/api/v1/onboarding/liveness-page',
+    jsonInit('PUT', { enabled }),
+  )
+}
+
 /** `POST /api/v1/integrations/post` — replay a result to every system (D19). */
 export async function postToCore(payload: VerifyResponse): Promise<PostToCoreResponse> {
   return requestJson<PostToCoreResponse>(

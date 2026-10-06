@@ -20,10 +20,12 @@ from app.api.v1.endpoints import (
     admin,
     artifacts,
     auth,
+    broker,
     face_capture,
     health,
     id_card,
     integrations,
+    onboarding,
     records,
     verification,
 )
@@ -38,3 +40,5 @@ api_router.include_router(id_card.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(verification.router)
 api_router.include_router(face_capture.router)
+api_router.include_router(onboarding.router)
+api_router.include_router(broker.router)

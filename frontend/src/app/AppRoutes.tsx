@@ -7,7 +7,9 @@ import { IdCardPage } from '../pages/IdCardPage'
 import { LandingPage } from '../pages/LandingPage'
 import { LoginPage } from '../pages/LoginPage'
 import { AdminPage } from '../pages/AdminPage'
+import { CustomerDisplayPage } from '../pages/CustomerDisplay'
 import { NotFoundPage } from '../pages/NotFoundPage'
+import { TellerDashboard } from '../pages/TellerDashboard'
 
 /**
  * Route tree.
@@ -36,15 +38,16 @@ export function AppRoutes() {
         <Route path={routes.idCard} element={<IdCardPage />} />
         {/* Phase 8 — Passport OCR, reachable independently of the ID-card journey. */}
         <Route path={routes.passport} element={<IdCardPage />} />
-        <Route
-          path={routes.admin}
+        <Route path={routes.admin}
           element={
             <RequireAdmin>
               <AdminPage />
             </RequireAdmin>
           }
         />
+        <Route path={routes.teller} element={<TellerDashboard />} />
       </Route>
+      <Route path={routes.display} element={<CustomerDisplayPage />} />
       <Route path={routes.notFound} element={<NotFoundPage />} />
     </Routes>
   )

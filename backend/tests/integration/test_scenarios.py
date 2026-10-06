@@ -1,16 +1,22 @@
-"""End-to-end scenarios A and F (§34).
+"""End-to-end scenarios A, D and F (§34).
 
-The two flows §34 makes possible in Phase 5, driven through the real HTTP stack
-with the real OCR provider: upload a card, let OCR fill the form, then verify.
-These are the tests that catch a break *between* phases — a field name the backend
-and frontend disagree on, or a requirement gate that disagrees with the OCR result.
+The flows §34 makes possible, driven through the real HTTP stack with the real
+OCR provider: upload a card, let OCR fill the form, then verify. These are the
+tests that catch a break *between* phases — a field name the backend and
+frontend disagree on, or a requirement gate that disagrees with the OCR result.
 
 Scenario A — ID Card → OCR → API #1 → Success
+Scenario D — ID Card → OCR → liveness clip → API #4 → Success
 Scenario F — Incorrect identity information → partial/failed
 
-Scenarios B, C, D, E, G and I are absent because the features they exercise
-(current face capture, liveness, passport OCR) do not exist yet. Writing them
-would mean mocking the very thing under test.
+Scenario D's clip arrives exactly as the customer display sends it, a POST to
+the broker endpoint, because the recording itself is covered by the broker tests
+and the browser tests; what only an end-to-end test catches is the chain after
+it — a handle minted by one call being refused by the next.
+
+Scenarios B, C, E, G, H and I have no test in this module; their inputs are
+driven, where they are driven at all, by the endpoint tests rather than end to
+end.
 """
 
 from __future__ import annotations
@@ -44,6 +50,11 @@ _CORRECTED_ID: dict[str, str] = {"nationalId": "123456789"}
 PROCESS = "/api/v1/kyc/id-card/process"
 METHODS = "/api/v1/kyc/verification-methods"
 VERIFY = "/api/v1/kyc/verify"
+LIVENESS = "/api/broker/verify-liveness"
+
+#: What the customer display's MediaRecorder emits, shaped enough for the
+#: artefact route to sniff it back as `video/webm`.
+_WEBM_CLIP = b"\x1a\x45\xdf\xa3" + b"\x00" * 64
 
 #: §14, verbatim. Spelled out here rather than imported from the app so the
 #: scenario asserts the contract the plan states, not what the code happens to
@@ -84,14 +95,20 @@ async def client(settings: Settings) -> AsyncIterator[AsyncClient]:
         yield http
 
 
-async def _ocr_identity(client: AsyncClient) -> dict[str, str | None]:
-    """Process a card and return exactly the nine §14 fields, as the form would."""
+async def _process(client: AsyncClient) -> dict:
+    """Upload a card and return the whole processing result — `documentRef`,
+    the OCR fields and everything else the form and the gates read off it."""
     response = await client.post(
         PROCESS,
         files={"document": ("id.jpg", card_with_face(), "image/jpeg")},
     )
     assert response.status_code == 200, response.text
-    identity = response.json()["ocr"]["fields"]
+    return response.json()
+
+
+async def _ocr_identity(client: AsyncClient) -> dict[str, str | None]:
+    """Process a card and return exactly the nine §14 fields, as the form would."""
+    identity = (await _process(client))["ocr"]["fields"]
     return {field: identity.get(field) for field in IDENTITY_FIELDS}
 
 
@@ -158,7 +175,47 @@ async def test_scenario_a_method_is_offered_before_the_user_chooses(
         "verify_user_info",
         "verify_user_info_face",
         "verify_user_info_idcard_face",
+        "verify_user_info_idcard_liveness",
     ]
+
+
+# --- Scenario D -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scenario_d_liveness_turns_api_4_into_a_success(client: AsyncClient) -> None:
+    """ID Card → OCR → liveness → API #4 → Success.
+
+    Three handles in one request: the document the OCR call minted, the clip the
+    broker call minted, and the identity the form corrected. Before Phase 7 the
+    third handle had nowhere to come from and the method card said so; the
+    refusal now is a genuinely missing input, never the phase itself.
+    """
+    card = await _process(client)
+    identity = {field: card["ocr"]["fields"].get(field) for field in IDENTITY_FIELDS}
+
+    clip = await client.post(
+        LIVENESS,
+        files={"liveness_video": ("clip.webm", _WEBM_CLIP, "video/webm")},
+    )
+    assert clip.status_code == 201, clip.text
+
+    verified = await client.post(
+        VERIFY,
+        json={
+            "method": "verify_user_info_idcard_liveness",
+            "userInformation": {**identity, **_COMPLETED_FORM, **_CORRECTED_ID},
+            "idCardRef": card["documentRef"],
+            "livenessRef": clip.json()["livenessRef"],
+        },
+    )
+
+    assert verified.status_code == 200, verified.text
+    body = verified.json()
+    assert body["status"] == "success"
+    assert body["identity"]["incorrectFields"] == []
+    assert body["idCard"] == {"required": True, "verified": True}
+    assert body["liveness"] == {"required": True, "verified": True}
 
 
 # --- Scenario F -------------------------------------------------------------

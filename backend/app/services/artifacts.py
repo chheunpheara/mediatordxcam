@@ -25,15 +25,15 @@ from pathlib import Path
 
 from app.core.errors import ArtifactNotFoundError
 from app.core.ids import is_artifact_handle, new_artifact_handle
-from app.services.uploads import ACCEPTED_MEDIA_TYPES, sniff_media_type
+from app.services.uploads import SERVABLE_MEDIA_TYPES, sniff_media_type
 
 logger = logging.getLogger("camdx.artefacts")
 
 #: Prefix for every stored artefact, so cleanup cannot wander into other files.
 ARTEFACT_PREFIX = "artefact_"
 
-#: Fallback for content we do not recognise. Not an image, so the artefact
-#: endpoint will refuse to serve it even though the bytes are intact.
+#: Fallback for content we do not recognise. Not a servable format, so the
+#: artefact endpoint will refuse to serve it even though the bytes are intact.
 UNKNOWN_MEDIA_TYPE = "application/octet-stream"
 
 #: Enough leading bytes for every accepted format's signature, including WebP,
@@ -226,8 +226,9 @@ def detect_media_type(path: Path) -> str:
 
     The type is a property of the content, not of what a caller said when
     storing it, and it is derived fresh on every read so it cannot drift. Only the
-    formats the upload rules accept are servable; anything else stays opaque rather
-    than being sent to a browser under a guessed content type.
+    formats this application stores — §7's images and Phase 7's liveness recordings
+    — are servable; anything else stays opaque rather than being sent to a browser
+    under a guessed content type.
     """
     try:
         with path.open("rb") as handle:
@@ -236,6 +237,6 @@ def detect_media_type(path: Path) -> str:
         return UNKNOWN_MEDIA_TYPE
 
     detected = sniff_media_type(head)
-    if detected in ACCEPTED_MEDIA_TYPES:
+    if detected in SERVABLE_MEDIA_TYPES:
         return detected
     return UNKNOWN_MEDIA_TYPE

@@ -221,8 +221,8 @@ export const VERIFICATION_METHODS: readonly VerificationMethod[] = [
     requiresLiveness: true,
     requiresPassport: false,
     isOcr: false,
-    available: false,
-    unavailableReason: 'This method needs a liveness check, which this build does not run yet.',
+    available: true,
+    unavailableReason: null,
   },
   {
     method: 'khmer_id_card_ocr',
@@ -286,7 +286,9 @@ export function stubKycFetch(
         ? makeFaceCapture()
         : url.includes('/api/v1/kyc/verify')
           ? verifyAnswers[Math.min(verifyCall++, verifyAnswers.length - 1)]!
-          : url.includes('/api/v1/records/mappings')
+          : url.includes('/api/v1/onboarding/liveness-page')
+                ? { enabled: false, sessionId: '' }
+                : url.includes('/api/v1/records/mappings')
             ? { mapping: null }
             : url.includes('/verification')
               ? makeUploadedRecord({ status: 'verified', verifiedAt: 1759710000 })

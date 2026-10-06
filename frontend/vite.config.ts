@@ -30,6 +30,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: BACKEND_ORIGIN, changeOrigin: true },
       '/health': { target: BACKEND_ORIGIN, changeOrigin: true },
+      '/ws': { target: BACKEND_ORIGIN.replace(/^http/, 'ws'), ws: true },
     },
   },
   preview: {

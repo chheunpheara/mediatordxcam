@@ -177,31 +177,37 @@ describe('the six methods (§9, §10)', () => {
     )
     expect(within(panel).queryByRole('button', { name: 'Enable Webcam' })).toBeNull()
 
-    // API 4 demands liveness, and only then does the panel render.
+    // API 4 demands liveness, and only then does the remote panel render.
     await userEvent.selectOptions(
       within(panel).getByRole('combobox', { name: 'Verification method' }),
       'verify_user_info_idcard_liveness',
     )
-    expect(await within(panel).findByRole('button', { name: 'Enable Webcam' })).toBeInTheDocument()
+    expect(
+      await within(panel).findByText(/No fixed customer display is enabled yet/i),
+    ).toBeInTheDocument()
   })
 })
 
-describe('unavailable methods (§9, :1355)', () => {
+describe('unavailable methods (§9)', () => {
   it('explains why a pending method cannot run rather than hiding it', async () => {
     await renderWorkspace()
     const panel = await methodPanel()
     const { default: userEvent } = await import('@testing-library/user-event')
 
+    // The one method still unavailable now that Phase 7 landed: passport OCR.
+    // API 4 used to be the subject here, and moved to the runnable side with
+    // the phase, which `lists all six official methods` still covers either way.
     await userEvent.selectOptions(
       await within(panel).findByRole('combobox', { name: 'Verification method' }),
-      'verify_user_info_idcard_liveness',
+      'passport_ocr',
     )
 
     expect(
       (
-        await within(panel).findAllByText(/needs a liveness check, which this build does not run yet/i)
+        await within(panel).findAllByText(/needs a passport image, which this build does not read yet/i)
       ).length,
     ).toBeGreaterThan(0)
+    expect(within(panel).getByRole('button', { name: 'Verify' })).toBeDisabled()
   })
 
   it('defaults to the first runnable method so the panel is never inert', async () => {

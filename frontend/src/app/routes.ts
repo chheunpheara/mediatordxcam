@@ -13,6 +13,8 @@ export const routes = {
   passport: '/id-card/passport',
   login: '/login',
   admin: '/admin',
+  teller: '/teller',
+  display: '/display',
   notFound: '*',
 } as const
 

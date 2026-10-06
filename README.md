@@ -14,8 +14,11 @@ endpoint, or a technical error.
 > Phase 4's three-column workspace is live: the original document with zoom (§9),
 > the OpenCV-extracted face (§12), and the nine editable identity fields (§14).
 > Verification methods and the CamDigiKey verify call are implemented in Phase 5.
-> Current face capture (6), liveness (7) and passport OCR (8) are still ahead, so those
-> methods render as unavailable and say why.
+> Current face capture and liveness are implemented too: the customer display
+> opens its webcam on the teller's command alone, records a clip, and the teller
+> panel plays the stored recording back — so four of the six methods run.
+> Passport OCR (8) is still ahead, so that method and the two OCR reads render
+> as unavailable and say why.
 
 ---
 

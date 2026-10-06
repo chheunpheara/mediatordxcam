@@ -1,0 +1,303 @@
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+
+import { openOnboardingSocket } from '../features/onboarding/onboardingSocket'
+import type { CustomerUiState, OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
+import { pickMimeType } from '../features/liveness/mimeTypes'
+
+/**
+ * Screen B (the customer-facing Address 1 monitor).
+ *
+ * Default is a calm, static welcome screen, camera closed. The teller's
+ * `activateLiveness` opens the webcam — the customer taps nothing: the only
+ * input this screen takes is the operating system's own permission prompt.
+ * Once live, frames stream to the teller tab at ~12 fps.
+ *
+ * When the teller dispatches `startRecording`, this tab records a 3-second
+ * MediaRecorder clip through the already-live stream, shows the countdown
+ * for the customer, uploads the blob to /api/broker/verify-liveness, and
+ * echoes `recordingFinished` back with the handle the teller then previews.
+ * A start that arrives while the camera is still opening is held and fired
+ * the moment the stream lands, so no command needs a click to take effect.
+ * A denied camera is reported to the teller, not only shown here.
+ *
+ * `cancelSession` (teller clicking "Reset session" or the room expiring) rips
+ * down tracks and recorder timers and returns to the welcome screen.
+ */
+
+const FRAME_INTERVAL_MS = 80 // ~12 fps; JPEG base64 sized for a modern web link
+const RECORD_SECONDS = 3
+
+export function CustomerDisplayPage() {
+  const [searchParams] = useSearchParams()
+  const sessionId = searchParams.get('session') ?? ''
+
+  const [screenState, setScreenState] = useState<CustomerUiState>('welcome')
+  const [webcamOn, setWebcamOn] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [countdown, setCountdown] = useState(RECORD_SECONDS)
+  const [note, setNote] = useState<string | null>(null)
+  const [cameraFailed, setCameraFailed] = useState(false)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const socketRef = useRef<ReturnType<typeof openOnboardingSocket> | null>(null)
+  const frameTimer = useRef<number | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const countdownTimer = useRef<number | null>(null)
+  // The socket handler is bound once (deps: sessionId), so it must read the
+  // webcam flag through a ref — a captured `webcamOn` would stay false
+  // forever and every `startRecording` would bounce instead of recording.
+  const webcamOnRef = useRef(false)
+  // A `getUserMedia` already in flight, so a repeated command cannot open a
+  // second stream on top of the first.
+  const cameraRequestRef = useRef(false)
+  // A `startRecording` that arrived before the camera was ready: fired the
+  // moment the stream lands, so the customer never has to click anything.
+  const pendingStartRef = useRef(false)
+
+  useEffect(() => {
+    webcamOnRef.current = webcamOn
+  }, [webcamOn])
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    if (videoRef.current) videoRef.current.srcObject = null
+  }
+  const stopFrames = () => {
+    if (frameTimer.current !== null) {
+      window.clearInterval(frameTimer.current)
+      frameTimer.current = null
+    }
+  }
+  const stopRecorder = () => {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    recorderRef.current = null
+    if (countdownTimer.current !== null) {
+      window.clearInterval(countdownTimer.current)
+      countdownTimer.current = null
+    }
+  }
+
+  // Outgoing frames: at ~12 fps, canvas-JPEG of the live preview.
+  const startFrameStream = () => {
+    frameTimer.current = window.setInterval(() => {
+      const video = videoRef.current
+      if (!video || video.readyState < 2) return
+      const canvas = document.createElement('canvas')
+      canvas.width = 640
+      canvas.height = 480
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      socketRef.current?.send({ type: 'frame', dataUrl: canvas.toDataURL('image/jpeg', 0.6) })
+    }, FRAME_INTERVAL_MS)
+  }
+
+  /** The teller's start command, held or immediate — never a customer click. */
+  const beginRecording = () => {
+    setScreenState('recording')
+    setRecording(true)
+    setCountdown(RECORD_SECONDS)
+    // 3-second MediaRecorder loop, compressed webm/mp4. The teller sees
+    // `recordingStarted`; the customer sees the countdown below the oval.
+    startClientRecording()
+    socketRef.current?.send({ type: 'recordingStarted' })
+  }
+
+  const enableWebcam = () => {
+    if (streamRef.current || cameraRequestRef.current) return
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const message = 'No webcam is available in this browser.'
+      setCameraFailed(true)
+      setNote(message)
+      socketRef.current?.send({ type: 'error', message })
+      return
+    }
+    cameraRequestRef.current = true
+    setCameraFailed(false)
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: 'user' }, audio: false })
+      .then((stream) => {
+        cameraRequestRef.current = false
+        streamRef.current = stream
+        setWebcamOn(true)
+        setNote(null)
+        const video = videoRef.current
+        if (video) {
+          video.muted = true
+          video.srcObject = stream
+          void video.play().catch(() => {})
+        }
+        socketRef.current?.send({ type: 'customerState', state: 'liveness' })
+        startFrameStream()
+        if (pendingStartRef.current) {
+          pendingStartRef.current = false
+          beginRecording()
+        }
+      })
+      .catch((cause: unknown) => {
+        cameraRequestRef.current = false
+        pendingStartRef.current = false
+        const message =
+          cause instanceof DOMException && cause.name === 'NotAllowedError'
+            ? 'Camera access was denied.'
+            : 'Could not access the camera.'
+        setCameraFailed(true)
+        setNote(message)
+        // The customer's screen is not the only place this must appear: the
+        // teller is the one who has to decide what to do about it.
+        socketRef.current?.send({ type: 'error', message })
+      })
+  }
+
+  // Incoming commands from the teller tab.
+  function handleMessage(envelope: OnboardingEnvelope) {
+    switch (envelope.type) {
+      case 'activateLiveness':
+        setScreenState('liveness')
+        setCameraFailed(false)
+        setNote('The teller is ready for your liveness check.')
+        enableWebcam()
+        break
+      case 'startRecording':
+        if (!webcamOnRef.current) {
+          // The camera is still opening (permission prompt, or the command
+          // beat `activateLiveness`): hold the start instead of refusing it.
+          pendingStartRef.current = true
+          setScreenState('liveness')
+          setNote('Starting the camera…')
+          enableWebcam()
+          break
+        }
+        beginRecording()
+        break
+      case 'cancelSession':
+        pendingStartRef.current = false
+        stopRecorder()
+        stopFrames()
+        stopStream()
+        setWebcamOn(false)
+        setRecording(false)
+        setScreenState('welcome')
+        setNote(null)
+        break
+      default:
+        break
+    }
+  }
+
+  const startClientRecording = () => {
+    const stream = streamRef.current
+    if (!stream || typeof MediaRecorder === 'undefined') {
+      setNote('This browser cannot record video.')
+      setRecording(false)
+      setScreenState('liveness')
+      return
+    }
+    countdownTimer.current = window.setInterval(() => {
+      setCountdown((current) => Math.max(0, current - 1))
+    }, 1000)
+    const mimeType = pickMimeType()
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    chunksRef.current = []
+    recorder.ondataavailable = (event: BlobEvent) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data)
+    }
+    recorder.onstop = () => {
+      if (countdownTimer.current !== null) {
+        window.clearInterval(countdownTimer.current)
+        countdownTimer.current = null
+      }
+      setRecording(false)
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' })
+      void uploadBlob(blob)
+      setScreenState('liveness')
+    }
+    recorderRef.current = recorder
+    recorder.start()
+    window.setTimeout(() => {
+      if (recorder.state === 'recording') recorder.stop()
+      setCountdown(0)
+    }, RECORD_SECONDS * 1000)
+  }
+
+  const chunksRef = useRef<BlobPart[]>([])
+
+  const uploadBlob = async (blob: Blob) => {
+    try {
+      const body = new FormData()
+      body.append('liveness_video', blob, blob.type.includes('mp4') ? 'liveness.mp4' : 'liveness.webm')
+      const response = await fetch('/api/broker/verify-liveness', { method: 'POST', body })
+      if (!response.ok) {
+        const json = (await response.json()) as { error?: { message?: string } }
+        throw new Error(json?.error?.message ?? 'Upload failed')
+      }
+      const json = (await response.json()) as { livenessRef?: unknown }
+      socketRef.current?.send({
+        type: 'recordingFinished',
+        livenessRef: typeof json.livenessRef === 'string' ? json.livenessRef : null,
+      })
+      setNote('Check recorded and sent for review.')
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : 'Liveness upload failed.')
+      socketRef.current?.send({ type: 'error', message: String(cause) })
+    }
+  }
+
+  useEffect(() => {
+    if (!sessionId) return
+    socketRef.current = openOnboardingSocket(sessionId, 'customer', handleMessage)
+    return () => {
+      stopRecorder()
+      stopFrames()
+      stopStream()
+      socketRef.current?.close()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
+
+  return (
+    <main
+      className="bg-ink flex min-h-screen flex-col items-center justify-center p-6 text-center text-white"
+      style={{ background: '#0b0e13' }}
+    >
+      {screenState === 'welcome' ? (
+        <section aria-live="polite">
+          <h1 className="text-5xl font-semibold tracking-tight">Welcome</h1>
+          <p className="mt-4 text-2xl opacity-80">and Thank You for Your Support</p>
+        </section>
+      ) : (
+        <section className="w-full max-w-xl">
+          <div className="liveness-stage">
+            <video
+              ref={videoRef}
+              className="liveness-stage__video"
+              playsInline
+              aria-label="Customer camera preview"
+            />
+            <div className="liveness-stage__dim" aria-hidden="true" />
+            <div className="liveness-stage__oval" aria-hidden="true" />
+            <p className="liveness-stage__hint" role="status">
+              {recording
+                ? `Look straight and blink slowly. ${countdown}s`
+                : webcamOn
+                  ? 'Hold still — the teller will start the check.'
+                  : cameraFailed
+                    ? 'Camera unavailable — the teller has been notified.'
+                    : 'Starting the camera…'}
+            </p>
+          </div>
+          <div className="mt-4 flex items-center justify-center gap-3">
+            {recording ? (
+              <p className="text-lg" role="status">
+                Keep that pose — finishing…
+              </p>
+            ) : null}
+          </div>
+          {note ? <p className="mt-3 text-sm text-white/70">{note}</p> : null}
+        </section>
+      )}
+    </main>
+  )
+}

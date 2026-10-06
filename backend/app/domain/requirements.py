@@ -113,7 +113,6 @@ METHOD_REQUIREMENTS: dict[VerificationMethod, MethodRequirements] = {
         RequirementFlag.USER_INFO,
         RequirementFlag.ID_CARD,
         RequirementFlag.LIVENESS,
-        introduced_in=("liveness",),
     ),
     VerificationMethod.KHMER_ID_CARD_OCR: _requirements(
         VerificationMethod.KHMER_ID_CARD_OCR,

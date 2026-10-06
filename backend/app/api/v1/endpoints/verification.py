@@ -35,17 +35,6 @@ router = APIRouter(tags=["verification"], dependencies=[Depends(current_user)])
 #: the two places never phrase the same refusal differently.
 NO_ACCESS_REASON = "Your account does not have access to this verification method."
 
-#: Why a method cannot run yet, keyed by the missing input. Plain language for the
-#: method card (§10); never a phase number or an internal note.
-_UNAVAILABLE_REASON: dict[RequirementFlag, str] = {
-    RequirementFlag.LIVENESS: (
-        "This method needs a liveness check, which this build does not run yet."
-    ),
-    RequirementFlag.PASSPORT: (
-        "This method needs a passport image, which this build does not read yet."
-    ),
-}
-
 
 @router.get(
     "/api/v1/kyc/verification-methods",
@@ -133,19 +122,17 @@ def _to_response(requirements: MethodRequirements, user: User) -> MethodRequirem
 
 
 def _reason_for(requirements: MethodRequirements, *, permitted: bool) -> str | None:
-    """First blocking reason for a method card, or `None` when it can run.
+    """Blocking reason for a method card, or `None` when it can run.
 
     Scope first (D18): an account without the permission is told about *that*,
-    not about the missing liveness input it was never going to be allowed to
-    use anyway.
+    not about an input it was never going to be allowed to supply. Otherwise the
+    only methods that cannot run are the two OCR APIs — they read a document
+    rather than verify anybody, so `verify` is the wrong endpoint for them.
     """
     if not permitted:
         return NO_ACCESS_REASON
-    flags = requirements.requires
     if requirements.is_ocr:
         return "This is a document read, not a verification. It runs when you process a document."
-    if RequirementFlag.LIVENESS in flags:
-        return _UNAVAILABLE_REASON[RequirementFlag.LIVENESS]
     return None
 
 

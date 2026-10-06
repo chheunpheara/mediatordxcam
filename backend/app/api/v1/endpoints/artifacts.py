@@ -2,10 +2,10 @@
 
 `GET /api/v1/kyc/artifacts/{handle}`
 
-The UI needs to *show* the original document and the extracted face. Serving them
-requires a route, but it must not become a general file server: the handle is
-opaque, the store verifies it, and nothing here can be coerced into reading an
-arbitrary path.
+The UI needs to *show* the original document, the extracted face and — since
+Phase 7 — the recorded liveness clip. Serving them requires a route, but it must
+not become a general file server: the handle is opaque, the store verifies it,
+and nothing here can be coerced into reading an arbitrary path.
 
 Artefacts are returned from an API route rather than a static mount precisely so
 that expiry is enforced on every read. A static file server would happily serve a
@@ -26,13 +26,16 @@ logger = logging.getLogger("camdx.api.artifacts")
 
 router = APIRouter(tags=["kyc"], dependencies=[Depends(current_user)])
 
-#: Correct types for the artefacts this application produces. Mirrors the accept
-#: list in `app/services/uploads.py`; a type absent here is refused rather than
-#: guessed, so a mis-written store cannot make this route a file server.
+#: Correct types for the artefacts this application produces. Mirrors
+#: `SERVABLE_MEDIA_TYPES` in `app/services/uploads.py` — §7's images plus the
+#: Phase 7 liveness recording; a type absent here is refused rather than guessed,
+#: so a mis-written store cannot make this route a file server.
 _MEDIA_TYPES = {
     "image/jpeg": "image/jpeg",
     "image/png": "image/png",
     "image/webp": "image/webp",
+    "video/webm": "video/webm",
+    "video/mp4": "video/mp4",
 }
 
 
@@ -50,8 +53,13 @@ _MEDIA_TYPES = {
                 "image/jpeg": {},
                 "image/png": {},
                 "image/webp": {},
+                "video/webm": {},
+                "video/mp4": {},
             },
-            "description": "Raw image bytes. Never cached beyond the artefact TTL.",
+            "description": (
+                "Raw bytes for an image or a liveness recording. Never cached "
+                "beyond the artefact TTL."
+            ),
         },
     },
 )
@@ -66,8 +74,9 @@ def get_artifact(handle: str, store: ArtifactStoreDep) -> Response:
 
     media_type = _MEDIA_TYPES.get(artefact.media_type)
     if media_type is None:
-        # Only images are ever stored. An unknown type means the store was
-        # written to incorrectly; refuse rather than guess a content type.
+        # Only the formats this application stores are servable. An unknown type
+        # means the store was written to incorrectly; refuse rather than guess a
+        # content type.
         raise AppError(ErrorCode.ARTIFACT_NOT_FOUND)
 
     data = artefact.path.read_bytes()

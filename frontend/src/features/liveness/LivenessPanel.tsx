@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { useLiveness } from './LivenessContext'
+import { pickMimeType } from './mimeTypes'
 
 /**
  * Record a three-second liveness video through the browser camera (Phase 7).
@@ -14,24 +15,10 @@ import { useLiveness } from './LivenessContext'
  * switch (this component unmounts) and on blob capture — `showCamera` runs a
  * single effect whose cleanup stops every track, and the recorder is torn
  * down with it, so the hardware indicator never outlives the UI that needs it.
- */
+  */
+
 const RECORD_SECONDS = 3
 const RECORD_INTERVAL_MS = 100
-const MIME_CANDIDATES = [
-  'video/webm;codecs=vp9,opus',
-  'video/webm;codecs=vp8,opus',
-  'video/webm',
-  'video/mp4',
-] as const
-
-/** First container the browser can actually record, so webm-only UAs get a path too. */
-function pickMimeType(): string | undefined {
-  if (typeof MediaRecorder === 'undefined') return undefined
-  for (const candidate of MIME_CANDIDATES) {
-    if (MediaRecorder.isTypeSupported(candidate)) return candidate
-  }
-  return undefined
-}
 
 export function LivenessPanel() {
   const { state, livenessRef, error, capture, reset } = useLiveness()
