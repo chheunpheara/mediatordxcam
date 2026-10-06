@@ -1,11 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AdminPage } from './AdminPage'
 import { AuthProvider } from '@/features/auth/AuthProvider'
-import type { AdminRole, AuthUser, VerificationMethodId } from '@/lib/api'
+import type { AdminRole, AuditLogEntry, AuthUser, VerificationMethodId } from '@/lib/api'
 import { bodyOf, urlOf } from '@/test/fixtures'
 
 /**
@@ -50,6 +50,60 @@ interface StubOptions {
   readonly users?: readonly AuthUser[]
   readonly createPolicyError?: boolean
 }
+
+/**
+ * Eleven entries so the footer has a second page to step to; the first two
+ * are the shapes that matter — a failed core post carrying its captured error
+ * body, and a verification whose national ID reached the log only as the
+ * masked form the store is allowed to keep (D25).
+ */
+const AUDIT_LOGS: readonly AuditLogEntry[] = [
+  {
+    id: 'aud_1',
+    createdAt: 1759744800,
+    staffId: 'u_admin',
+    staffEmail: 'admin@gmail.com',
+    staffRole: 'Admin',
+    actionType: 'POST_TO_CORE',
+    targetSystemUrl: 'https://core.example.gov.kh/identity',
+    payloadSnapshot: { fullName: 'SOKHA CHAM', nationalId: '123***89', submitted: '123***89' },
+    biometricConfidenceScore: null,
+    status: 'FAILED',
+    errorResponse: 'HTTPStatusError: 500 Internal Server Error',
+    completedAt: 1759744801,
+  },
+  {
+    id: 'aud_2',
+    createdAt: 1759744700,
+    staffId: 'u_loan',
+    staffEmail: 'loan@example.com',
+    staffRole: 'Loan Officer',
+    actionType: 'IDENTITY_VERIFIED',
+    targetSystemUrl: null,
+    payloadSnapshot: { fullName: 'SOKHA CHAM', nationalId: '123***89' },
+    biometricConfidenceScore: 87.5,
+    status: 'SUCCESS',
+    errorResponse: null,
+    completedAt: 1759744701,
+  },
+  ...Array.from(
+    { length: 9 },
+    (_, index): AuditLogEntry => ({
+      id: `aud_${index + 3}`,
+      createdAt: 1759744000 - index,
+      staffId: 'u_loan',
+      staffEmail: 'loan@example.com',
+      staffRole: 'Loan Officer',
+      actionType: 'CAMDX_FETCH',
+      targetSystemUrl: null,
+      payloadSnapshot: { fullName: 'SOKHA CHAM' },
+      biometricConfidenceScore: null,
+      status: 'SUCCESS',
+      errorResponse: null,
+      completedAt: 1759744001 - index,
+    }),
+  ),
+]
 
 /**
  * Route `fetch` by endpoint, keeping the role list *mutable* so a PUT visibly
@@ -153,6 +207,35 @@ function stubAdminFetch(options: StubOptions = {}) {
     if (url.includes('/admin/users')) {
       return Promise.resolve(
         new Response(JSON.stringify({ users: state.users }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    }
+    if (url.includes('/admin/audit-logs')) {
+      // The server refuses a range that runs backwards (D25); everything else
+      // is answered with the trail as stored — filters are the client's to
+      // send, and the test asserts the query rather than the filtering.
+      const parsed = new URL(url, 'http://test')
+      const from = parsed.searchParams.get('dateFrom')
+      const to = parsed.searchParams.get('dateTo')
+      if (from !== null && to !== null && from > to) {
+        const message = 'The start date must be on or before the end date.'
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: {
+                code: 'INVALID_REQUEST',
+                message,
+                fieldErrors: { dateFrom: message },
+              },
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ logs: AUDIT_LOGS, total: AUDIT_LOGS.length }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -307,5 +390,96 @@ describe('the roles tab', () => {
     await userEvent.click(within(adminRow).getByRole('button', { name: 'Confirm delete' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('A user still holds this role.')
+  })
+})
+
+describe('the audit tab', () => {
+  it('lists the trail and expands an entry to its masked evidence', async () => {
+    stubAdminFetch()
+
+    renderAdmin()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Audit trail' }))
+
+    expect(await screen.findByText('admin@gmail.com')).toBeInTheDocument()
+    // Scoped to the table: the filter selects offer the same option words.
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('POST_TO_CORE')).toBeInTheDocument()
+    expect(within(table).getByText('FAILED')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1–10 of 11')).toBeInTheDocument()
+
+    // Expanding the failed post shows what was stored: the masked national
+    // ID, never the raw number, next to the error body the post captured.
+    // Scoped to its row — every row's details exist in the DOM at once.
+    const firstRow = screen.getAllByText('View')[0]!.closest('tr')!
+    await userEvent.click(within(firstRow).getByText('View'))
+    expect(within(firstRow).getByText(/123\*\*\*89/)).toBeInTheDocument()
+    expect(within(firstRow).getByText(/HTTPStatusError/)).toBeInTheDocument()
+    expect(screen.queryByText(/123456789/)).toBeNull()
+  })
+
+  it('combines every filter into one query when applied', async () => {
+    const fetchMock = stubAdminFetch()
+
+    renderAdmin()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Audit trail' }))
+    await screen.findByText('admin@gmail.com')
+
+    await userEvent.type(screen.getByLabelText('Staff ID'), 'u_loan')
+    await userEvent.selectOptions(screen.getByLabelText('Action'), 'POST_TO_CORE')
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'FAILED')
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2025-10-01' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2025-10-06' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((call) => {
+          const url = urlOf(call[0])
+          return (
+            url.includes('/admin/audit-logs') &&
+            url.includes('staffId=u_loan') &&
+            url.includes('actionType=POST_TO_CORE') &&
+            url.includes('status=FAILED') &&
+            url.includes('dateFrom=2025-10-01') &&
+            url.includes('dateTo=2025-10-06')
+          )
+        }),
+      ).toBe(true),
+    )
+  })
+
+  it('steps to the next page of the trail', async () => {
+    const fetchMock = stubAdminFetch()
+
+    renderAdmin()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Audit trail' }))
+    await screen.findByText('Showing 1–10 of 11')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          (call) => urlOf(call[0]).includes('/admin/audit-logs') && urlOf(call[0]).includes('offset=10'),
+        ),
+      ).toBe(true),
+    )
+    expect(await screen.findByText('Showing 11–11 of 11')).toBeInTheDocument()
+  })
+
+  it('shows the server refusal for a range that runs backwards', async () => {
+    stubAdminFetch()
+
+    renderAdmin()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Audit trail' }))
+    await screen.findByText('admin@gmail.com')
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2025-10-06' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2025-10-01' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The start date must be on or before the end date.',
+    )
   })
 })

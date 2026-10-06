@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUserDep, KycServiceDep, current_user
+from app.api.deps import AuditServiceDep, CurrentUserDep, KycServiceDep, current_user
 from app.core.errors import AppError, ErrorCode
 from app.domain.auth import User
 from app.domain.enums import RequirementFlag, VerificationMethod
@@ -76,28 +76,41 @@ async def verification_methods(
     summary="Verify identity with one of the six CamDigiKey APIs",
 )
 async def verify(
-    request: VerifyRequest, service: KycServiceDep, user: CurrentUserDep
+    request: VerifyRequest, service: KycServiceDep, user: CurrentUserDep, audit: AuditServiceDep
 ) -> VerifyResponse:
     """Run one verification method (§19).
 
     Two gates, in order: the account must hold the permission for the requested
     method (`FORBIDDEN`, D18), then the request must carry every input that
-    method needs (`REQUIREMENTS_NOT_MET`, §11) — both before any upstream call.
+    method needs (`REQUIREMENTS_NOT_MET`, §11) - both before any upstream call.
+
+    Every attempt is recorded in the audit trail (D25): born `SUCCESS` with the
+    masked request and outcome when the adapter answers, born `FAILED` with the
+    refusal when it raises. The recording is best-effort, so an audit problem
+    never becomes a verification outage.
     """
     if request.method not in user.permissions:
         raise AppError(ErrorCode.FORBIDDEN, message=NO_ACCESS_REASON)
 
     identity = request.userInformation.as_dict() if request.userInformation else None
 
-    outcome = await service.verify(
-        method=request.method,
-        identity=identity,
-        id_card_ref=request.idCardRef,
-        current_face_ref=request.currentFaceRef,
-        liveness_ref=request.livenessRef,
-        id_card_face_ref=request.idCardFaceRef,
-    )
-    return _to_verify_response(outcome)
+    try:
+        outcome = await service.verify(
+            method=request.method,
+            identity=identity,
+            id_card_ref=request.idCardRef,
+            current_face_ref=request.currentFaceRef,
+            liveness_ref=request.livenessRef,
+            id_card_face_ref=request.idCardFaceRef,
+        )
+    except AppError as exc:
+        await audit.record_verification(
+            user=user, request=request, response=None, failure=exc.message
+        )
+        raise
+    response = _to_verify_response(outcome)
+    await audit.record_verification(user=user, request=request, response=response, failure=None)
+    return response
 
 
 def _to_response(requirements: MethodRequirements, user: User) -> MethodRequirementsResponse:

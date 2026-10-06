@@ -752,3 +752,64 @@ export async function saveRecordMapping(mapping: ColumnMapping): Promise<ColumnM
   )
   return body.mapping
 }
+
+/* ------------------------------------------------------------------------- *
+ * Audit trail: the read-only evidence log (D25)
+ * ------------------------------------------------------------------------- */
+
+/** The action vocabulary; the outcome lives in `status`, not the action name. */
+export type AuditActionType =
+  | 'CAMDX_FETCH'
+  | 'IDENTITY_VERIFIED'
+  | 'MANUAL_APPROVED'
+  | 'POST_TO_CORE'
+
+export type AuditLogStatus = 'PENDING' | 'SUCCESS' | 'FAILED'
+
+/** One immutable entry; `payloadSnapshot` was masked before it was stored. */
+export interface AuditLogEntry {
+  readonly id: string
+  readonly createdAt: number
+  readonly staffId: string
+  readonly staffEmail: string
+  readonly staffRole: string
+  readonly actionType: AuditActionType
+  readonly targetSystemUrl: string | null
+  readonly payloadSnapshot: Record<string, unknown>
+  readonly biometricConfidenceScore: number | null
+  readonly status: AuditLogStatus
+  readonly errorResponse: string | null
+  readonly completedAt: number | null
+}
+
+/** The list's controls, sent as query parameters in one call. */
+export interface AuditLogQuery {
+  readonly staffId?: string
+  readonly actionType?: AuditActionType
+  readonly status?: AuditLogStatus
+  readonly dateFrom?: string
+  readonly dateTo?: string
+  readonly limit?: number
+  readonly offset?: number
+}
+
+export interface AuditLogListResponse {
+  readonly logs: readonly AuditLogEntry[]
+  readonly total: number
+}
+
+/** `GET /api/v1/admin/audit-logs` — filters, paging, admin-only (D25). */
+export async function fetchAuditLogs(query: AuditLogQuery = {}): Promise<AuditLogListResponse> {
+  const params = new URLSearchParams()
+  if (query.staffId) params.set('staffId', query.staffId)
+  if (query.actionType) params.set('actionType', query.actionType)
+  if (query.status) params.set('status', query.status)
+  if (query.dateFrom) params.set('dateFrom', query.dateFrom)
+  if (query.dateTo) params.set('dateTo', query.dateTo)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined) params.set('offset', String(query.offset))
+  const suffix = params.toString()
+  return requestJson<AuditLogListResponse>(
+    `/api/v1/admin/audit-logs${suffix ? `?${suffix}` : ''}`,
+  )
+}

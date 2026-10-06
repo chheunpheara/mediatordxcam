@@ -21,6 +21,7 @@ from app.domain.auth import ALL_PERMISSIONS, Role, User, UserStatus
 from app.integrations.camdx.mock.ocr import MockOcrProvider
 from app.integrations.camdx.ocr import OcrProvider
 from app.services.artifacts import TempArtifactStore
+from app.services.audit import AuditService
 from app.services.auth import AuthService
 from app.services.documents import DocumentProcessor
 from app.services.face import FaceService
@@ -260,6 +261,24 @@ def record_service_provider(request: Request, settings: SettingsDep) -> RecordSe
 
 
 RecordServiceDep = Annotated[RecordService, Depends(record_service_provider)]
+
+
+def audit_service_provider(request: Request, settings: SettingsDep) -> AuditService:
+    """The audit trail service (D25), built once per application.
+
+    Cached on `app.state` like the account service. Construction is cheap:
+    the store (and its append-only triggers) is built on first use inside a
+    worker thread, so a broken DSN fails the audit write itself rather than
+    every request that merely asks for the service.
+    """
+    cached: AuditService | None = getattr(request.app.state, "audit_service", None)
+    if cached is None:
+        cached = AuditService(settings)
+        request.app.state.audit_service = cached
+    return cached
+
+
+AuditServiceDep = Annotated[AuditService, Depends(audit_service_provider)]
 
 
 async def require_core_post(user: CurrentUserDep) -> User:

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { AuditPanel } from '../features/admin/AuditPanel'
 import { PermissionsPanel } from '../features/admin/PermissionsPanel'
 import { RolesPanel } from '../features/admin/RolesPanel'
 import { UsersPanel } from '../features/admin/UsersPanel'
@@ -7,24 +8,26 @@ import { ApiError, fetchPermissions, fetchRoles } from '../lib/api'
 import type { AdminRole, PermissionItem } from '../lib/api'
 
 /**
- * Account administration (D18): users, roles and the permission matrix.
+ * Account administration (D18) and the audit trail (D25): four tabs, one page.
  *
- * Three tabs, one page. Roles and the six permissions are loaded here once and
- * passed down, because two of the three tabs need them and a tab switch should
- * not re-ask — the users form picks roles to assign, the matrix needs both
- * sides of it. Accounts are fetched by their own tab, which is the only panel
- * that renders them.
+ * Roles and the six permissions are loaded here once and passed down, because
+ * two of the tabs need them and a tab switch should not re-ask — the users
+ * form picks roles to assign, the matrix needs both sides of it. Accounts are
+ * fetched by their own tab, which is the only panel that renders them. The
+ * audit tab needs neither list, so it renders before they arrive instead of
+ * waiting behind the accounts' own loading gate.
  *
  * Every mutation happens inside a panel and reports back through
  * `onRolesChanged`, so a created or renamed role appears in the matrix without
  * this page knowing what the panel did.
  */
-type Tab = 'users' | 'roles' | 'permissions'
+type Tab = 'users' | 'roles' | 'permissions' | 'audit'
 
 const TABS: readonly { readonly id: Tab; readonly label: string }[] = [
   { id: 'users', label: 'Users' },
   { id: 'roles', label: 'Roles' },
   { id: 'permissions', label: 'Permissions' },
+  { id: 'audit', label: 'Audit trail' },
 ]
 
 export function AdminPage() {
@@ -64,7 +67,7 @@ export function AdminPage() {
       <h1 className="text-2xl font-semibold">Administration</h1>
       <p className="text-ink-muted mt-2 text-sm">
         Manage who can sign in, which roles exist, and which verification methods each role may
-        run.
+        run — then review everything that happened in the audit trail.
       </p>
 
       <div className="mt-6 flex flex-wrap gap-2" role="tablist" aria-label="Administration sections">
@@ -103,7 +106,9 @@ export function AdminPage() {
         aria-labelledby={`admin-tab-${tab}`}
         className="mt-4"
       >
-        {!roles || !permissions ? (
+        {tab === 'audit' ? (
+          <AuditPanel />
+        ) : !roles || !permissions ? (
           <p className="text-ink-muted text-sm" role="status">
             Loading accounts…
           </p>

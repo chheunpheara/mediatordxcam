@@ -104,9 +104,17 @@ async def post_to_core(
     the service replays it to each target with Basic auth and reports per-url
     outcomes in safe words (§28). `400` when nothing is configured, so the
     click never silently "succeeds" without a target.
+
+    The service records the click in the audit trail (D25) before anything is
+    sent and finalises the entry afterwards; the response here maps the failed
+    targets onto `PostFailureResponse`, dropping the audit-only detail
+    (status codes, driver text, upstream bodies) that §28 keeps off-screen.
     """
-    outcome = await service.post_to_core(body.payload)
+    outcome = await service.post_to_core(body.payload, actor=_user)
     return PostToCoreResponse(
         posted=outcome["posted"],
-        failed=[PostFailureResponse(**item) for item in outcome["failed"]],
+        failed=[
+            PostFailureResponse(url=item["url"], reason=item["reason"])
+            for item in outcome["failed"]
+        ],
     )

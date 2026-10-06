@@ -21,12 +21,14 @@ import httpx
 
 from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
+from app.domain.auth import User
 from app.infrastructure.integration_store import (
     IntegrationSetting,
     IntegrationStore,
     new_setting_id,
     resolve_integration_database_url,
 )
+from app.services.audit import AuditService
 
 #: Outbound post timeout. Deliberately a module constant, not a Settings
 #: field: one number, no compose/env surface for a value no operator asked for.
@@ -53,11 +55,15 @@ class IntegrationService:
         settings: Settings,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        audit: AuditService | None = None,
     ) -> None:
         self._store = IntegrationStore(resolve_integration_database_url(settings.database_url))
         #: Injected in tests (`httpx.MockTransport`); production sends over
         #: the real network with the default transport.
         self._transport = transport
+        #: The audit trail (D25). Defaults to one over the same settings, so
+        #: a test override of the transport still records its posts.
+        self._audit = audit or AuditService(settings)
 
     async def list_settings(self) -> list[IntegrationSetting]:
         """Every target including passwords — callers decide what may leave."""
@@ -152,22 +158,54 @@ class IntegrationService:
         reason = _reason_for_status(response.status_code)
         return {"ok": reason is None, "reason": reason}
 
-    async def post_to_core(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Send `payload` to every configured system (D19).
+    async def post_to_core(self, payload: dict[str, Any], *, actor: User) -> dict[str, Any]:
+        """Send `payload` to every configured system, under audit (D19, D25).
 
         One outbound POST per stored setting, HTTP Basic with the stored
-        credentials. The answer is always a `200` describing each target —
+        credentials. The answer is always a `200` describing each target -
         `posted` for the systems that took it, `failed` (with one of the safe
-        reasons above) for the rest — so a browser can report partial success
+        reasons above) for the rest - so a browser can report partial success
         honestly. Only "nothing is configured" is an error: without it a
         silent all-empty result would look like success.
+
+        The audit trail wraps the dispatch in two phases (D25): the click
+        commits a `PENDING` entry *before* any target is called - if that
+        write fails nothing goes out - and the outcome then finalises it once,
+        `SUCCESS` when every system took it and `FAILED` otherwise, with the
+        failing targets' status codes and error bodies captured in the audit
+        row (never in this return value, which stays in §28's safe words).
         """
         targets = await self.list_settings()
-        if not targets:
-            raise AppError(ErrorCode.INVALID_REQUEST, message=NO_SETTINGS_MESSAGE)
+        entry_id = await self._audit.begin_post(
+            user=actor, payload=payload, target_urls=[target.url for target in targets]
+        )
+        try:
+            if not targets:
+                raise AppError(ErrorCode.INVALID_REQUEST, message=NO_SETTINGS_MESSAGE)
+            outcome = await self._dispatch(payload, targets)
+        except AppError as exc:
+            await self._audit.finalize_post(entry_id, outcome=None, failure=exc.message)
+            raise
+        except Exception as exc:
+            await self._audit.finalize_post(
+                entry_id, outcome=None, failure=f"{type(exc).__name__}: {exc}"
+            )
+            raise
+        await self._audit.finalize_post(entry_id, outcome=outcome, failure=None)
+        return outcome
 
+    async def _dispatch(
+        self, payload: dict[str, Any], targets: list[IntegrationSetting]
+    ) -> dict[str, Any]:
+        """Post to each target once; per-target outcomes in safe words (§28).
+
+        Each `failed` item also carries `statusCode`, `detail` and `body` for
+        the audit row - the evidence a compliance review needs. They are
+        stripped again by the endpoint on the way out, so the operator-facing
+        response never contains an upstream status, driver message or body.
+        """
         posted: list[str] = []
-        failed: list[dict[str, str]] = []
+        failed: list[dict[str, Any]] = []
         async with httpx.AsyncClient(
             transport=self._transport, timeout=POST_TIMEOUT_SECONDS
         ) as client:
@@ -178,16 +216,40 @@ class IntegrationService:
                         json=payload,
                         auth=(target.api_user, target.api_password),
                     )
-                except httpx.TimeoutException:
-                    failed.append({"url": target.url, "reason": REASON_TIMEOUT})
-                except httpx.TransportError:
-                    failed.append({"url": target.url, "reason": REASON_UNREACHABLE})
+                except httpx.TimeoutException as exc:
+                    failed.append(
+                        {
+                            "url": target.url,
+                            "reason": REASON_TIMEOUT,
+                            "statusCode": None,
+                            "detail": _driver_detail(exc),
+                            "body": None,
+                        }
+                    )
+                except httpx.TransportError as exc:
+                    failed.append(
+                        {
+                            "url": target.url,
+                            "reason": REASON_UNREACHABLE,
+                            "statusCode": None,
+                            "detail": _driver_detail(exc),
+                            "body": None,
+                        }
+                    )
                 else:
                     reason = _reason_for_status(response.status_code)
                     if reason is None:
                         posted.append(target.url)
                     else:
-                        failed.append({"url": target.url, "reason": reason})
+                        failed.append(
+                            {
+                                "url": target.url,
+                                "reason": reason,
+                                "statusCode": response.status_code,
+                                "detail": None,
+                                "body": _truncated(response.text),
+                            }
+                        )
 
         return {"posted": posted, "failed": failed}
 
@@ -226,3 +288,15 @@ def _reason_for_status(status_code: int) -> str | None:
     if status_code in (401, 403):
         return REASON_CREDENTIALS
     return REASON_REJECTED
+
+
+def _truncated(text: str, limit: int = 1000) -> str:
+    """An upstream body for the audit row: bounded, never the whole story."""
+    return text[:limit]
+
+
+def _driver_detail(exc: Exception) -> str:
+    """What the transport said, for the audit row only (§28 keeps it off-screen)."""
+    detail = str(exc).strip()
+    name = type(exc).__name__
+    return _truncated(f"{name}: {detail}" if detail else name)
