@@ -7,6 +7,7 @@ import { IDENTITY_FORM_FIELDS } from '@/components/verification/identityFields'
 import { FACE_MESSAGES } from '@/features/id-card-processing/faceMessages'
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
 import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
+import { LivenessProvider } from '@/features/liveness/LivenessProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { bodyOf, makeProcessingResult, makeUploadedRecord, makeVerifyResult, stubProcessingFetch, urlOf, VERIFICATION_METHODS } from '@/test/fixtures'
 import { saveStoredDocument } from '@/lib/documentStore'
@@ -39,7 +40,9 @@ function renderAt(path: string) {
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
           <FaceCaptureProvider>
-            <AppRoutes />
+            <LivenessProvider>
+              <AppRoutes />
+            </LivenessProvider>
           </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>

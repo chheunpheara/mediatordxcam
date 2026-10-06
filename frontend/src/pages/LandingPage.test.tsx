@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
 import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
+import { LivenessProvider } from '@/features/liveness/LivenessProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { AppRoutes } from '@/app/AppRoutes'
 import { MAX_FILE_SIZE_BYTES, MESSAGES } from '@/features/document-upload/validation'
@@ -53,7 +54,9 @@ function renderLanding() {
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
           <FaceCaptureProvider>
-            <AppRoutes />
+            <LivenessProvider>
+              <AppRoutes />
+            </LivenessProvider>
           </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>
@@ -227,7 +230,9 @@ describe('workspace without a document', () => {
         <DocumentSessionProvider>
           <IdCardProcessingProvider>
             <FaceCaptureProvider>
-              <AppRoutes />
+              <LivenessProvider>
+                <AppRoutes />
+              </LivenessProvider>
             </FaceCaptureProvider>
           </IdCardProcessingProvider>
         </DocumentSessionProvider>

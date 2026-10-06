@@ -1,5 +1,6 @@
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
+import { LivenessPanel } from '../../features/liveness/LivenessPanel'
 import { FieldCheckList } from './FieldCheckList'
 import { PostToCoreAction } from './PostToCoreAction'
 import { sectionsOf } from './sectionRows'
@@ -92,6 +93,8 @@ export function VerificationMethodPanel() {
       )}
 
       {chosen?.requiresCurrentFace ? <FaceCapturePanel /> : null}
+
+      {chosen?.requiresLiveness ? <LivenessPanel /> : null}
 
       <button
         className="btn-primary mt-4 w-full"

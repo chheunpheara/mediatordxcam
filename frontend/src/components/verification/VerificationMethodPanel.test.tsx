@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRoutes } from '@/app/AppRoutes'
 import { DocumentSessionProvider } from '@/features/document-upload/DocumentSessionProvider'
 import { FaceCaptureProvider } from '@/features/face-capture/FaceCaptureProvider'
+import { LivenessProvider } from '@/features/liveness/LivenessProvider'
 import { IdCardProcessingProvider } from '@/features/id-card-processing/IdCardProcessingProvider'
 import { writeAuthUser } from '@/lib/auth'
 import {
@@ -47,7 +48,9 @@ function renderAt(path: string) {
       <DocumentSessionProvider>
         <IdCardProcessingProvider>
           <FaceCaptureProvider>
-            <AppRoutes />
+            <LivenessProvider>
+              <AppRoutes />
+            </LivenessProvider>
           </FaceCaptureProvider>
         </IdCardProcessingProvider>
       </DocumentSessionProvider>
@@ -157,6 +160,29 @@ describe('the six methods (§9, §10)', () => {
         within(panel).getByText('Needs: identity information, your ID card, liveness.'),
       ).toBeInTheDocument(),
     )
+  })
+
+  it('renders the liveness capture only when its method is selected', async () => {
+    await renderWorkspace()
+    const panel = await methodPanel()
+    const { default: userEvent } = await import('@testing-library/user-event')
+
+    // No method yet: the camera UI never appears, even in an API-4 world.
+    expect(within(panel).queryByRole('button', { name: 'Enable Webcam' })).toBeNull()
+
+    // Selecting another method does not introduce the camera UI.
+    await userEvent.selectOptions(
+      await within(panel).findByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info',
+    )
+    expect(within(panel).queryByRole('button', { name: 'Enable Webcam' })).toBeNull()
+
+    // API 4 demands liveness, and only then does the panel render.
+    await userEvent.selectOptions(
+      within(panel).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_idcard_liveness',
+    )
+    expect(await within(panel).findByRole('button', { name: 'Enable Webcam' })).toBeInTheDocument()
   })
 })
 

@@ -1,12 +1,18 @@
-import type { ProcessIdCardResponse } from './api'
+import type { FaceStatus, ProcessIdCardResponse } from './api'
 import type { ProcessingState } from '../features/id-card-processing/ProcessingContext'
 import type { IdentityDraft } from '../features/id-card-processing/IdentityDraftContext'
-import type { FaceStatus } from '../lib/api'
 
 export interface StoredProcessing {
   readonly state: ProcessingState
   readonly result: ProcessIdCardResponse | null
   readonly draft: IdentityDraft
+  readonly error: string | null
+}
+
+export interface StoredLiveness {
+  readonly state: 'idle' | 'capturing' | 'ready' | 'failed'
+  readonly livenessRef: string | null
+  readonly ownedBy: string | null
   readonly error: string | null
 }
 
@@ -23,6 +29,7 @@ export interface Session {
   docStored?: boolean
   processing?: StoredProcessing
   face?: StoredFace
+  liveness?: StoredLiveness
 }
 
 const STORAGE_KEY = 'camdx:session'

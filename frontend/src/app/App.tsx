@@ -2,6 +2,7 @@ import { IdCardProcessingProvider } from '../features/id-card-processing/IdCardP
 import { DocumentSessionProvider } from '../features/document-upload/DocumentSessionProvider'
 import { FaceCaptureProvider } from '../features/face-capture/FaceCaptureProvider'
 import { AuthProvider } from '../features/auth/AuthProvider'
+import { LivenessProvider } from '../features/liveness/LivenessProvider'
 
 import { AppErrorBoundary } from './AppErrorBoundary'
 import { AppRoutes } from './AppRoutes'
@@ -31,9 +32,11 @@ export function App() {
         <DocumentSessionProvider>
           <IdCardProcessingProvider>
             <FaceCaptureProvider>
-              <div id="main-content">
-                <AppRoutes />
-              </div>
+              <LivenessProvider>
+                <div id="main-content">
+                  <AppRoutes />
+                </div>
+              </LivenessProvider>
             </FaceCaptureProvider>
           </IdCardProcessingProvider>
         </DocumentSessionProvider>

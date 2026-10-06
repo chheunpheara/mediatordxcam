@@ -131,3 +131,63 @@
 .rdp-button_next:hover .rdp-chevron {
   fill: var(--color-brand-hover);
 }
+
+/*
+ * Liveness capture: a dark stage with a centered face-oval cut out of the
+ * dimming overlay. Everything except the oval is shaded back, guiding the
+ * user's face into the clear region (§16). The dim overlay is punched out
+ * with a mask, so the oval lines up with the video no matter the frame size.
+ */
+.liveness-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: #0b0e13;
+}
+
+.liveness-stage__video {
+  @apply w-full bg-[#0b0e13] object-cover;
+  display: block;
+  max-height: 16rem;
+  aspect-ratio: 4 / 3;
+  transform: scaleX(-1);
+}
+
+.liveness-stage__dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(0 0 0 / 0.55);
+  mask: radial-gradient(
+    ellipse 38% 48% at center,
+    transparent 98%,
+    black 99%
+  );
+  -webkit-mask: radial-gradient(
+    ellipse 38% 48% at center,
+    transparent 98%,
+    black 99%
+  );
+}
+
+.liveness-stage__oval {
+  position: absolute;
+  top: 2%;
+  bottom: 2%;
+  left: 12%;
+  right: 12%;
+  border: 2px solid rgb(255 255 255 / 0.85);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.liveness-stage__hint {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0.6rem;
+  margin: 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+}

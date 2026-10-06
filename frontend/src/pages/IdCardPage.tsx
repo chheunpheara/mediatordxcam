@@ -16,6 +16,7 @@ import { useDocumentSession } from '../features/document-upload/DocumentSessionC
 import { resolveIdentity } from '../features/id-card-processing/IdentityDraftContext'
 import { useIdCardProcessing } from '../features/id-card-processing/ProcessingContext'
 import { useFaceCapture } from '../features/face-capture/FaceCaptureContext'
+import { useLiveness } from '../features/liveness/LivenessContext'
 import { clearSession } from '../lib/session'
 import { IDENTITY_FIELDS } from '../lib/api'
 import type { IdentityResponse, UploadedRecord, VerifyResponse } from '../lib/api'
@@ -61,6 +62,7 @@ function Workspace() {
   const { document, restoring, clear: clearDocument } = useDocumentSession()
   const { state, result, error, process, draft, reset } = useIdCardProcessing()
   const faceCapture = useFaceCapture()
+  const livenessCapture = useLiveness()
   const { activeRecord, markVerified, stop } = useRecords()
 
   const handleBackToUpload = () => {
@@ -68,6 +70,7 @@ function Workspace() {
     clearDocument()
     reset()
     faceCapture.reset()
+    livenessCapture.reset()
   }
 
   const needsProcessing = state === 'idle' && document !== null
@@ -102,7 +105,7 @@ function Workspace() {
           identity,
           documentRef: result?.documentRef ?? null,
           currentFaceRef: faceCapture.faceRef,
-          livenessRef: null,
+          livenessRef: livenessCapture.livenessRef,
           idCardFaceRef: result?.face?.faceRef ?? null,
         }}
         onResult={handleResult}

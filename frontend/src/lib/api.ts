@@ -237,6 +237,45 @@ export async function captureCurrentFace(file: File | Blob): Promise<FaceCapture
   return (await response.json()) as FaceCaptureResponse
 }
 
+/** `POST /api/broker/verify-liveness`. */
+export interface LivenessResponse {
+  readonly livenessRef: string
+}
+
+/**
+ * Submit a recorded liveness video.
+ *
+ * The blob must carry its own container (webm or mp4); a fallback filename is
+ * derived from the blob type so a typeless recording still reaches the broker
+ * labelled correctly.
+ */
+export async function verifyLiveness(video: File | Blob): Promise<LivenessResponse> {
+  const body = new FormData()
+  const filename =
+    video instanceof File
+      ? video.name
+      : video.type.includes('mp4')
+        ? 'liveness.mp4'
+        : 'liveness.webm'
+  body.append('liveness_video', video, filename)
+
+  let response: Response
+  try {
+    response = await fetch(apiUrl('/api/broker/verify-liveness'), {
+      method: 'POST',
+      body,
+    })
+  } catch {
+    throw new ApiError('NETWORK_ERROR', NETWORK_ERROR_MESSAGE, 0)
+  }
+
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+
+  return (await response.json()) as LivenessResponse
+}
+
 /**
  * URL for a stored artefact (§14, §29).
  *
