@@ -47,11 +47,85 @@ _ATTRIBUTE_FOR = {
     "expiryDate": "expiry_date",
 }
 
-_DATE_RE = re.compile(r"\b(\d{1,2}[-/.\s]\s*\d{1,2}[-/.\s]\s*\d{2,4})\b")
+#: A date as printed on a card: `15/01/2022` or — the usual case on a Cambodian
+#: ID — `15 JAN 2022`, which Tesseract reads with the month in Latin letters.
+_NUM_DATE = r"\d{1,2}[-/.\s]\s*\d{1,2}[-/.\s]\s*\d{2,4}"
+_NAMED_DATE = r"\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{2,4}"
+_DATE_RE = re.compile(rf"\b((?:{_NUM_DATE})|(?:{_NAMED_DATE}))\b")
+_NAMED_DATE_RE = re.compile(r"(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{2,4})")
 _KHMER_RE = re.compile(r"[\u1780-\u17ff]")
 
 #: Tesseract sometimes returns Khmer numerals where the card prints Latin 0-9.
 _KHMER_DIGITS = str.maketrans("០១២៣៤៥៦៧៨៩", "0123456789")
+
+#: English month names as `strptime`'s `%b` knows them, plus the full spellings
+#: Tesseract sometimes returns instead.
+_EN_MONTHS = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+
+#: The month names a Khmer ID card prints beside the English ones. They are
+#: rewritten to the English abbreviation before parsing, so one date routine
+#: covers both scripts.
+_KHMER_MONTHS = {
+    "មករា": "jan",
+    "កុម្ភៈ": "feb",
+    "មីនា": "mar",
+    "មេសា": "apr",
+    "ឧសភា": "may",
+    "មិថុនា": "jun",
+    "កក្កដា": "jul",
+    "សីហា": "aug",
+    "កញ្ឆា": "sep",
+    "តុលា": "oct",
+    "វិច្ឆិកា": "nov",
+    "ធ្នូ": "dec",
+}
+
+
+def _latinised(value: str) -> str:
+    """Khmer numerals to Latin digits and Khmer months to their English names.
+
+    One rewrite lets every routine below — the label scans as well as the
+    date candidates — read dates printed in either script.
+    """
+    latin = value.translate(_KHMER_DIGITS)
+    for khmer, abbr in sorted(_KHMER_MONTHS.items(), key=lambda item: -len(item[0])):
+        latin = latin.replace(khmer, abbr)
+    return latin
+
+
+def _iso_date(day: str, month: int, year: str) -> str | None:
+    parsed = int(year)
+    if parsed < 100:
+        parsed += 1900 if parsed >= 69 else 2000
+    try:
+        return datetime(parsed, month, int(day)).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
 
 
 class LocalTesseractOcrProvider(OcrProvider):
@@ -208,7 +282,8 @@ class LocalTesseractOcrProvider(OcrProvider):
                 ),
                 "date",
             ),
-            expiry_date=self._label_value(
+            expiry_date=self._expiry_candidate(text)
+            or self._label_value(
                 text,
                 (
                     r"exp\.??\s*date",
@@ -400,13 +475,26 @@ class LocalTesseractOcrProvider(OcrProvider):
         return candidates[index] if index < len(candidates) else None
 
     def _normalise_date(self, value: str | None) -> str | None:
+        """Normalise any date rendering a card gives us to `YYYY-MM-DD`.
+
+        Tesseract reads Cambodian card dates as `15/01/2022`, as `15 JAN 2022`
+        (Latin month, as printed) and as Khmer numerals with a Khmer month
+        (`១៥ មករា ២០២២`); all three reach here.
+        """
         if not value:
             return None
-        if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", value):
-            return value
-        match = _DATE_RE.search(value)
+        latin = _latinised(value)
+        if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", latin):
+            return latin
+        match = _DATE_RE.search(latin)
         if not match:
             return None
+        named = _NAMED_DATE_RE.fullmatch(match.group(1))
+        if named:
+            month = _EN_MONTHS.get(named.group(2).lower().rstrip("."))
+            if month is None:
+                return None
+            return _iso_date(named.group(1), month, named.group(3))
         for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d %m %Y", "%d-%m-%y"):
             try:
                 return datetime.strptime(match.group(1), fmt).strftime("%Y-%m-%d")
@@ -433,6 +521,24 @@ class LocalTesseractOcrProvider(OcrProvider):
             if 1920 <= year <= 2015:
                 return iso
         return None
+
+    def _expiry_candidate(self, text: str) -> str | None:
+        """Heuristic for the expiry date, tried before the label scan.
+
+        Mirrors `_birth_candidate`. A card prints an issue date and, later, an
+        expiry date — both well past the birth window — so with at least two
+        distinct plausible dates the newest is the expiry. Tesseract sometimes
+        jumbles the word "Expiry" onto the issue line, which makes the label
+        scan pick the issue date; the newest-date rule is immune to that.
+        A single plausible date could just be the issue date, so nothing is
+        claimed and the field stays for the user to enter (§16: never guess).
+        """
+        plausible = {
+            iso
+            for m in _DATE_RE.finditer(text)
+            if (iso := self._normalise_date(m.group(0))) and 2016 <= int(iso[:4]) <= 2100
+        }
+        return max(plausible) if len(plausible) >= 2 else None
 
     def _gender(self, text: str) -> str | None:
         match = re.search(r"\b(male|female|m|f|ប្រុស|ស្រី)\b", text, re.IGNORECASE | re.UNICODE)

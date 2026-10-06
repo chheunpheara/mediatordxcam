@@ -62,7 +62,7 @@ export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFor
       </div>
 
       <p className="text-ink-subtle mt-1 text-xs" role="status">
-        {source === 'upload' ? 'Imported from the uploaded file.' : ocrStatusLabel(ocr)}
+        {source === 'upload' ? 'Imported from the uploaded file.' : ocrStatusLabel(ocr, emptyRequired.length)}
       </p>
       <p className="text-ink-subtle mt-2 text-xs leading-relaxed">
         {source === 'upload'
@@ -140,12 +140,15 @@ export function IdentityForm({ ocr, hasDraft, source = 'document' }: IdentityFor
   )
 }
 
-function ocrStatusLabel(ocr: IdentityResponse): string {
+function ocrStatusLabel(ocr: IdentityResponse, emptyRequired: number): string {
   switch (ocr.status) {
     case 'completed':
       return 'All fields were read from the card.'
     case 'partial':
-      return `Some fields could not be read. Check the ${ocr.missingFields.length === 1 ? 'highlighted field' : `${ocr.missingFields.length} highlighted fields`} and fill ${ocr.missingFields.length === 1 ? 'it' : 'them'} in.`
+      if (emptyRequired === 0) {
+        return 'Some fields could not be read. Check the values above before verifying.'
+      }
+      return `Some fields could not be read. Check the ${emptyRequired === 1 ? 'highlighted field' : `${emptyRequired} highlighted fields`} and fill ${emptyRequired === 1 ? 'it' : 'them'} in.`
     case 'unreadable':
       return 'Nothing could be read from this card. Please enter the details by hand.'
   }
