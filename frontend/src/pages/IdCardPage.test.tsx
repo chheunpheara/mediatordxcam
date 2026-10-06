@@ -509,18 +509,6 @@ describe('uploaded records (D23)', () => {
     return fetchMock
   }
 
-  it('offers Upload beside Export and opens its dialog', async () => {
-    stubRecordsWorkflow()
-    renderAt('/id-card')
-
-    const upload = await screen.findByRole('button', { name: 'Upload' })
-    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
-
-    fireEvent.click(upload)
-
-    expect(await screen.findByRole('dialog', { name: 'Upload records' })).toBeInTheDocument()
-  })
-
   it('Start fills the form from a row, with no document attached', async () => {
     stubRecordsWorkflow()
     renderAt('/id-card')

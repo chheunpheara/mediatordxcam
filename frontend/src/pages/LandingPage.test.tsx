@@ -73,6 +73,14 @@ describe('landing page upload flow', () => {
     expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument()
   })
 
+  it('offers Upload for bulk records and opens its dialog', async () => {
+    renderLanding()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Upload' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Upload records' })).toBeInTheDocument()
+  })
+
   it('previews a valid image and offers to continue', async () => {
     const { container } = renderLanding()
 

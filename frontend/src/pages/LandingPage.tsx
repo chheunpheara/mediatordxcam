@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { routes } from '../app/routes'
+import { UploadDataAction } from '../components/verification/UploadDataAction'
 import { useDocumentSession } from '../features/document-upload/DocumentSessionContext'
 import { Dropzone } from '../features/document-upload/Dropzone'
 import { ImagePreview } from '../features/document-upload/ImagePreview'
@@ -73,10 +74,15 @@ export function LandingPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center p-4 sm:p-6">
       <div className="card p-6 sm:p-8">
-        <h1 className="text-2xl font-semibold">Identity Verification</h1>
-        <p className="text-ink-muted mt-2 text-sm">
-          Verify your identity securely using your Cambodian National ID Card.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Identity Verification</h1>
+            <p className="text-ink-muted mt-2 text-sm">
+              Verify your identity securely using your Cambodian National ID Card.
+            </p>
+          </div>
+          <UploadDataAction />
+        </div>
 
         <div className="mt-8">
           {document ? (

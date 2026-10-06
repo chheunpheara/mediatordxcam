@@ -7,7 +7,6 @@ import { ExportAction } from '../components/verification/ExportAction'
 import { PostSettingsAction } from '../components/verification/PostSettingsAction'
 import { FaceColumn } from '../components/verification/FaceColumn'
 import { IdentityForm } from '../components/verification/IdentityForm'
-import { UploadDataAction } from '../components/verification/UploadDataAction'
 import { UploadedRecordsList } from '../components/verification/UploadedRecordsList'
 import { VerificationMethodPanel } from '../components/verification/VerificationMethodPanel'
 import { recordName, useRecords } from '../features/records/RecordsContext'
@@ -38,12 +37,12 @@ import type { IdentityResponse, UploadedRecord, VerifyResponse } from '../lib/ap
  * but no result, so the call is made here too instead of showing an empty
  * workspace.
  *
- * The header pairs "Back to upload" with Export (D17) and Upload (D23): a file
- * of rows can be brought in beside the export that takes verified data out, and
- * the uploaded records it produces are listed below the workspace, each one
- * startable into this form regardless of any document (D23). The provider wraps
- * the whole page so the method panel, the header's actions and the records list
- * all read the same session state.
+ * The header pairs "Back to upload" with Export (D17): verified data goes out
+ * as a file, while bulk rows come in through Upload on the landing page (D23)
+ * and are listed below the workspace, each one startable into this form
+ * regardless of any document. The provider wraps the whole page so the method
+ * panel, the header's actions and the records list all read the same session
+ * state.
  *
  * Verification can only start once the chosen method's own inputs are present.
  * Today that means API 1: current-face capture is Phase 6 and liveness is Phase 7,
@@ -62,7 +61,7 @@ function Workspace() {
   const { document, restoring, clear: clearDocument } = useDocumentSession()
   const { state, result, error, process, draft, reset } = useIdCardProcessing()
   const faceCapture = useFaceCapture()
-  const { activeRecord, markVerified, uploaded, stop } = useRecords()
+  const { activeRecord, markVerified, stop } = useRecords()
 
   const handleBackToUpload = () => {
     clearSession()
@@ -116,7 +115,6 @@ function Workspace() {
             </Link>
             <PostSettingsAction />
             <ExportAction />
-            <UploadDataAction onUploaded={uploaded} />
           </div>
         </div>
 

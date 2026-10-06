@@ -3,15 +3,16 @@ import { useCallback, useState } from 'react'
 import { UploadDataModal } from './UploadDataModal'
 
 /**
- * The workspace header's Upload button and its dialog (D23).
+ * The landing page's Upload button and its dialog (D23).
  *
- * Beside Export, its mirror: Export takes the session's verified data out as a
- * file, Upload brings a file's data in to be verified. The icon is inline SVG
+ * Beside the identity card it mirrors Export on the workspace: Export takes
+ * the session's verified data out as a file, Upload brings a file's data in to
+ * be verified, and the workspace lists what it submits. The icon is inline SVG
  * so the button needs no icon package (same rule as the gear in Post
  * Settings), and the adjacent text carries the meaning (§32).
  *
- * `onUploaded` is how the caller below learns a submission landed — the
- * records list refetches so the new rows are visible without a refresh.
+ * `onUploaded` is how a caller learns a submission landed — a list of records
+ * elsewhere can refetch so the new rows are visible without a refresh.
  */
 export function UploadDataAction({
   onUploaded,
