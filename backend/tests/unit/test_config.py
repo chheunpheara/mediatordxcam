@@ -47,11 +47,11 @@ def test_environment_overrides_are_read(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_cors_origins_accept_a_comma_separated_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173, https://kyc.example.com")
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000, https://kyc.example.com")
 
     settings = Settings(_env_file=None)
 
-    assert settings.cors_origins == ["http://localhost:5173", "https://kyc.example.com"]
+    assert settings.cors_origins == ["http://localhost:3000", "https://kyc.example.com"]
 
 
 def test_secrets_are_wrapped_so_they_cannot_be_logged_by_accident(

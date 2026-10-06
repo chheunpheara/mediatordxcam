@@ -133,15 +133,15 @@ process alone.
 
 The backend is deliberately API-only: it ships no copy of the browser bundle, so
 only one origin can ever serve the UI. For frontend work with hot reload, run Vite
-on the host alongside the containers — see below. That is the only case where
-5173 is used.
+on the host instead of the frontend container — see below. Both listen on :3000,
+so only one of them may run at a time.
 
 ### Local development
 
 ```bash
 make setup            # venv + npm install
 make backend-run      # API on :8000 with reload
-make frontend-run     # Vite on :5173, proxying /api to :8000  ← frontend dev loop
+make frontend-run     # Vite on :3000, proxying /api to :8000  ← frontend dev loop
 make check            # lint, format, typecheck, tests — both sides
 ```
 
@@ -150,7 +150,10 @@ Two ways to run the frontend, and they are not interchangeable:
 | How | URL | Use when |
 |-----|-----|----------|
 | `make docker-up` | :3000 | Testing the real build, or anything containerised |
-| `make frontend-run` | :5173 | Writing frontend code — Vite HMR, proxies `/api` to :8000 |
+| `make frontend-run` | :3000 | Writing frontend code — Vite HMR, proxies `/api` to :8000 |
+
+Both claim :3000: stop the container before starting Vite
+(`docker compose stop frontend`), or stop Vite before `make docker-up`.
 
 Requires Python 3.11–3.13 and Node 20.19+. Python is capped below 3.14 for
 OpenCV wheel availability; the Docker image pins 3.12 regardless of the host.
@@ -169,7 +172,7 @@ All settings live in `backend/app/core/config.py`. `.env.example` lists them all
 | `CAMDX_TIMEOUT` | `30` | Seconds |
 | `CAMDX_EXPOSE_DEVELOPER_VIEW` | `false` | Adds a dev-only block to results |
 | `LOG_SENSITIVE_PAYLOADS` | `false` | **Unsafe.** Payload logging |
-| `CORS_ORIGINS` | `http://localhost:5173` | Explicit list; wildcards rejected |
+| `CORS_ORIGINS` | `http://localhost:3000` | Explicit list; wildcards rejected |
 | `MAX_UPLOAD_BYTES` | `10485760` | Hard upload cap |
 | `TEMP_ARTIFACT_TTL_SECONDS` | `900` | Biometric artefact lifetime |
 | `TEMP_STORAGE_DIR` | `var/tmp` | Must stay outside any static mount |

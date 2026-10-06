@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     # `NoDecode` disables pydantic-settings' JSON pre-parsing for this field so a
     # plain comma-separated env value works without JSON quoting.
     cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:5173"],
+        default_factory=lambda: ["http://localhost:3000"],
         description="Explicit allow-list. Wildcards are rejected in production.",
     )
 

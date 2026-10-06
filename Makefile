@@ -70,7 +70,7 @@ frontend-build: ## Production build (typecheck + bundle)
 backend-run: ## Start the API with reload on :8000
 	cd $(BACKEND) && .venv/bin/uvicorn app.main:app --reload --port 8000
 
-frontend-run: ## Start the Vite dev server on :5173
+frontend-run: ## Start the Vite dev server on :3000
 	cd $(FRONTEND) && npm run dev
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ docker-up: ## Start the stack and print where things are
 	@printf '  API           http://localhost:8000   (backend, direct)\n'
 	@printf '  API docs      http://localhost:8000/docs   (also on :3000/docs)\n'
 	@printf '\n  The browser only addresses :3000; nginx proxies /api to :8000.\n'
-	@printf '  For hot-reload frontend work run: make frontend-run  (Vite, :5173)\n\n'
+	@printf '  For hot-reload frontend work: docker compose stop frontend, then make frontend-run (:3000)\n\n'
 
 docker-down: ## Stop the stack and delete volumes, including biometric temp files
 	docker compose down -v --remove-orphans

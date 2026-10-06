@@ -140,7 +140,7 @@ the exception: they are consumed by the `postgres` service in compose, not by
 | `OCR_LANGUAGES` | `eng+khm` | Tesseract language codes |
 | `OLLAMA_BASE_URL` | — | Local Ollama server for NLP capture (Docker: `host.docker.internal`) |
 | `OLLAMA_MODEL` | `llama3.1` | Ollama model for field extraction |
-| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allow-list |
+| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allow-list |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Hard upload cap (§29) |
 | `MIN_IMAGE_WIDTH` / `MIN_IMAGE_HEIGHT` | `640` / `480` | Minimum resolution (must match `frontend/src/features/document-upload/validation.ts`) |
 | `TEMP_STORAGE_DIR` | `var/tmp` | Outside every static path |
@@ -288,5 +288,5 @@ curl -s localhost:8000/openapi.json | jq '.paths | keys'
 | Frontend 404s on `/api` | Dev proxy not applied | Restart Vite; confirm `vite.config.ts` proxy |
 | `uvicorn` not found | venv not active | `source backend/.venv/bin/activate` |
 | `opencv` import error | Interpreter outside `>=3.11,<3.14`, or missing headless wheel | Use 3.12 and `pip install -e ".[dev]"` |
-| Port 5173 or 8000 in use | Previous run still alive | `lsof -ti:5173 \| xargs kill` |
+| Port 3000 or 8000 in use | Previous run still alive (Vite, Docker, or uvicorn) | Free :3000 with `docker compose stop frontend` or `lsof -ti:3000 \| xargs kill`; free :8000 with `lsof -ti:8000 \| xargs kill` |
 | `mypy` errors after `pip install -e` | Missing dev extras | `pip install -e ".[dev]"` |

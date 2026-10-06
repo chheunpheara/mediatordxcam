@@ -25,7 +25,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 3000,
     strictPort: true,
     proxy: {
       '/api': { target: BACKEND_ORIGIN, changeOrigin: true },
@@ -33,7 +33,7 @@ export default defineConfig({
     },
   },
   preview: {
-    port: 5173,
+    port: 3000,
     strictPort: true,
   },
   build: {
