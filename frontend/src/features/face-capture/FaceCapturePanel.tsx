@@ -8,8 +8,17 @@ import { useFaceCapture } from './FaceCaptureContext'
  * Upload or webcam-capture the current face (Phase 6 §17). Signs the photo up by
  * uploading it to `POST /api/v1/kyc/face-capture` and returns its handle via
  * `useFaceCapture().faceRef`.
+ *
+ * `hidePhoto` drops the still itself — for the report dialog, where the same
+ * picture is already the one the composition art is built on. One picture on
+ * screen is the point: this panel keeps the capture, its detection status and
+ * Retake, and gives up only the second copy of the pixels.
  */
-export function FaceCapturePanel() {
+export function FaceCapturePanel({
+  hidePhoto = false,
+}: {
+  readonly hidePhoto?: boolean
+} = {}) {
   const { state, faceRef, captureStatus, error, capture, reset } = useFaceCapture()
   const fileRef = useRef<HTMLInputElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -87,11 +96,13 @@ export function FaceCapturePanel() {
 
       {faceRef ? (
         <div className="mt-2">
-          <img
-            alt="Captured current face"
-            className="max-h-40 rounded-lg object-contain"
-            src={artifactUrl(faceRef)}
-          />
+          {hidePhoto ? null : (
+            <img
+              alt="Captured current face"
+              className="max-h-40 rounded-lg object-contain"
+              src={artifactUrl(faceRef)}
+            />
+          )}
           <p className="text-ink-subtle mt-1 text-xs">
             {captureStatus === 'detected'
               ? 'A face was detected in your photo.'

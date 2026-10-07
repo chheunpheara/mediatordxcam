@@ -27,8 +27,16 @@ import { artifactUrl, fetchLivenessPageSettings } from '../../lib/api'
  * accepted the customer's camera is meant to stay closed (it closes itself on
  * success), so a monitor tab that reloads must not be told to film again;
  * reopening it is what "Re-record" is for.
+ *
+ * `hideClip` drops the playback itself — for the report dialog, where the same
+ * recording is already the clip the composition art frames. The section still
+ * says a clip exists and still offers Re-record; only the second player goes.
  */
-export function RemoteCameraFeed() {
+export function RemoteCameraFeed({
+  hideClip = false,
+}: {
+  readonly hideClip?: boolean
+} = {}) {
   const { adopt, livenessRef } = useLiveness()
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
@@ -148,7 +156,7 @@ export function RemoteCameraFeed() {
             <p className="text-negative mt-2 text-xs" role="alert">
               This recording has expired. Please run the liveness check again.
             </p>
-          ) : (
+          ) : hideClip ? null : (
             <video
               aria-label="Recorded liveness clip"
               className="mt-2 max-h-72 w-full rounded-lg bg-transparent"

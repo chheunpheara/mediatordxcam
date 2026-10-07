@@ -268,6 +268,12 @@ export function stubKycFetch(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods: readonly VerificationMethod[] = VERIFICATION_METHODS,
   verifyResult: VerifyResponse | VerifyResponse[] = makeVerifyResult(),
+  // The customer display is off by default: only a test that exercises the
+  // teller screen asks for one, since enabling it opens a relay socket.
+  livenessPage: { readonly enabled: boolean; readonly sessionId: string } = {
+    enabled: false,
+    sessionId: '',
+  },
 ): ReturnType<typeof vi.fn> {
   // An array answers successive /verify calls (last one repeats), so a test can
   // drive run after run through the accumulated list (D16).
@@ -287,7 +293,7 @@ export function stubKycFetch(
         : url.includes('/api/v1/kyc/verify')
           ? verifyAnswers[Math.min(verifyCall++, verifyAnswers.length - 1)]!
           : url.includes('/api/v1/onboarding/liveness-page')
-                ? { enabled: false, sessionId: '' }
+                ? livenessPage
                 : url.includes('/api/v1/records/mappings')
             ? { mapping: null }
             : url.includes('/verification')

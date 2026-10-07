@@ -62,8 +62,9 @@ async function renderWorkspace(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods?: readonly VerificationMethod[],
   verifyResult?: VerifyResponse | VerifyResponse[],
+  livenessPage?: { readonly enabled: boolean; readonly sessionId: string },
 ) {
-  const fetchMock = stubKycFetch(result, methods, verifyResult)
+  const fetchMock = stubKycFetch(result, methods, verifyResult, livenessPage)
   const view = renderAt('/')
 
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
@@ -371,7 +372,10 @@ describe('the verify action (§11, §19)', () => {
     fireEvent.change(upload as HTMLInputElement, {
       target: { files: [new File(['x'], 'face.jpg', { type: 'image/jpeg' })] },
     })
-    await screen.findByAltText('Captured current face')
+    // The photo landed, and the dialog's first column shows it exactly once:
+    // as the art. Its capture panel keeps the controls, not a second copy.
+    await screen.findByAltText('Your live photo')
+    expect(screen.queryByAltText('Captured current face')).toBeNull()
 
     const retry = await within(panel).findByRole('button', { name: 'Verify' })
     await waitFor(() => expect(retry).toBeEnabled())
@@ -527,11 +531,57 @@ interface VerifyRequestPayload {
   readonly userInformation: Record<string, string | null>
 }
 
+/**
+ * The relay, driven by the test: jsdom has no WebSocket, and the teller
+ * screen only renders its controls once the customer display answers. Every
+ * frame sent is recorded so a test can prove the dialog's copy is the one
+ * talking to the customer's tab.
+ */
+class TestWebSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly sent: string[] = []
+  /** The socket the last component opened, so a test can answer it. */
+  static current: TestWebSocket | null = null
+  onopen: (() => void) | null = null
+  onmessage: ((event: { readonly data: string }) => void) | null = null
+  readyState = TestWebSocket.CONNECTING
+
+  constructor(_url: string) {
+    TestWebSocket.current = this
+    setTimeout(() => {
+      this.readyState = TestWebSocket.OPEN
+      this.onopen?.()
+    }, 0)
+  }
+
+  send(raw: string) {
+    TestWebSocket.sent.push(raw)
+  }
+
+  close() {
+    this.readyState = -1 // CLOSED
+  }
+
+  /** The relay handing an envelope back to the teller tab. */
+  emit(envelope: unknown) {
+    this.onmessage?.({ data: JSON.stringify(envelope) })
+  }
+}
+
 describe('the report dialog (§24)', () => {
   /** The workspace with the identity form filled and Verify pressed. */
-  async function openReport(verifyResult?: VerifyResponse | VerifyResponse[]) {
+  async function openReport(
+    verifyResult?: VerifyResponse | VerifyResponse[],
+    customerDisplay = false,
+  ) {
     const { default: userEvent } = await import('@testing-library/user-event')
-    await renderWorkspace(makeProcessingResult(), undefined, verifyResult)
+    const { fetchMock } = await renderWorkspace(
+      makeProcessingResult(),
+      undefined,
+      verifyResult,
+      customerDisplay ? { enabled: true, sessionId: 'sess_test_1' } : undefined,
+    )
 
     fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
       target: { value: '1994-02-11' },
@@ -542,8 +592,153 @@ describe('the report dialog (§24)', () => {
     await userEvent.click(button)
 
     const report = await screen.findByRole('dialog', { name: 'Verification' })
-    return { panel, report, userEvent }
+    return { fetchMock, panel, report, userEvent }
   }
+
+  /** How many runs the dialog has sent. */
+  function verifyCalls(fetchMock: ReturnType<typeof vi.fn>): number {
+    return fetchMock.mock.calls.filter(([input]) => urlOf(input).includes('/api/v1/kyc/verify'))
+      .length
+  }
+
+  it('takes the method choice itself, and the panel follows it', async () => {
+    const { panel, report, userEvent } = await openReport()
+
+    const dialogSelect = within(report).getByRole('combobox', { name: 'Verification method' })
+    expect(dialogSelect).toHaveValue('verify_user_info')
+
+    await userEvent.selectOptions(dialogSelect, 'khmer_id_card_ocr')
+
+    // One provider, two copies of the control: they cannot disagree.
+    expect(within(panel).getByRole('combobox', { name: 'Verification method' })).toHaveValue(
+      'khmer_id_card_ocr',
+    )
+    // The sentence saying the choice cannot run comes along with it…
+    expect(
+      within(report).getByText(/reads a document rather than verifying/i),
+    ).toBeInTheDocument()
+    // …and so does the disabled footer button it explains.
+    expect(within(report).getByRole('button', { name: 'Verify' })).toBeDisabled()
+  })
+
+  it('starts a run from the dialog without leaving it', async () => {
+    const { fetchMock, report, userEvent } = await openReport()
+    await within(report).findByRole('status', { name: 'Verification result' })
+    expect(verifyCalls(fetchMock)).toBe(1)
+
+    await userEvent.click(within(report).getByRole('button', { name: 'Verify' }))
+
+    await waitFor(() => expect(verifyCalls(fetchMock)).toBe(2))
+    expect(
+      await within(report).findByRole('status', { name: 'Verification result' }),
+    ).toBeInTheDocument()
+    // The report never went anywhere: still the one dialog, still open.
+    expect(screen.getAllByRole('dialog', { name: 'Verification' })).toHaveLength(1)
+  })
+
+  it('hands the customer display to the first column, so a photo is taken from here', async () => {
+    vi.stubGlobal('WebSocket', TestWebSocket)
+    TestWebSocket.sent.length = 0
+    const { panel, report, userEvent } = await openReport(undefined, true)
+
+    // The dialog's own selector picks the method whose picture column shows.
+    await userEvent.selectOptions(
+      within(report).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_face',
+    )
+
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+    const camera = await within(preview).findByRole('region', { name: 'Customer camera' })
+    expect(within(camera).getByRole('button', { name: 'Take photo' })).toBeInTheDocument()
+    // The upload the panel used to own moved with it — one copy in the
+    // document, and it sits inside the dialog the teller is looking at.
+    expect(within(panel).queryByRole('region', { name: 'Customer camera' })).toBeNull()
+    const uploads = document.querySelectorAll('#current-face-upload')
+    expect(uploads).toHaveLength(1)
+    expect(preview.contains(uploads[0]!)).toBe(true)
+
+    // …and it is a live copy: the customer's camera was asked to open.
+    await waitFor(() =>
+      expect(TestWebSocket.sent.some((raw) => raw.includes('activateFaceCapture'))).toBe(true),
+    )
+  })
+
+  it('starts the liveness check from the dialog, without the panel holding a second one', async () => {
+    vi.stubGlobal('WebSocket', TestWebSocket)
+    TestWebSocket.sent.length = 0
+    const { panel, report, userEvent } = await openReport(undefined, true)
+
+    await userEvent.selectOptions(
+      within(report).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_idcard_liveness',
+    )
+
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+    expect(
+      await within(preview).findByRole('button', { name: 'Start liveness check' }),
+    ).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: 'Start liveness check' })).toBeNull()
+    expect(within(panel).queryByText(/No fixed customer display is enabled yet/i)).toBeNull()
+
+    await waitFor(() =>
+      expect(TestWebSocket.sent.some((raw) => raw.includes('activateLiveness'))).toBe(true),
+    )
+  })
+
+  it('shows the photo once: the art owns the pixels, the capture keeps the controls', async () => {
+    vi.stubGlobal('WebSocket', TestWebSocket)
+    TestWebSocket.sent.length = 0
+    const { report, userEvent } = await openReport(undefined, true)
+
+    await userEvent.selectOptions(
+      within(report).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_face',
+    )
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+
+    const upload = document.getElementById('current-face-upload')
+    await waitFor(() => expect(upload).toBeTruthy())
+    fireEvent.change(upload as HTMLInputElement, {
+      target: { files: [new File(['x'], 'face.jpg', { type: 'image/jpeg' })] },
+    })
+
+    // Retake still says the capture is there…
+    await within(preview).findByRole('button', { name: 'Retake' })
+    // …but the picture itself is on screen once, not twice.
+    expect(within(preview).getAllByAltText('Your live photo')).toHaveLength(1)
+    expect(within(preview).queryByAltText('Captured current face')).toBeNull()
+  })
+
+  it('shows the recording once: the art frames it, the feed keeps Re-record', async () => {
+    vi.stubGlobal('WebSocket', TestWebSocket)
+    TestWebSocket.sent.length = 0
+    const { report, userEvent } = await openReport(undefined, true)
+
+    await userEvent.selectOptions(
+      within(report).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_idcard_liveness',
+    )
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+
+    await userEvent.click(
+      await within(preview).findByRole('button', { name: 'Start liveness check' }),
+    )
+    await waitFor(() =>
+      expect(TestWebSocket.sent.some((raw) => raw.includes('startRecording'))).toBe(true),
+    )
+
+    // The customer's tab answers the way it really does: two envelopes.
+    const socket = TestWebSocket.current!
+    socket.emit({ type: 'recordingStarted' })
+    socket.emit({ type: 'recordingFinished', livenessRef: 'art_0a1b2c3d4e5f60718293a4b5c6d7e8f9' })
+
+    await within(preview).findByRole('button', { name: 'Re-record' })
+    expect(within(preview).getByText('A liveness video was recorded.')).toBeInTheDocument()
+    // One player, not two: the art's. (jsdom exposes no `video` role, so this
+    // counts the elements the dialog's column actually renders.)
+    expect(within(preview).getAllByLabelText('Liveness recording')).toHaveLength(1)
+    expect(preview.querySelectorAll('video')).toHaveLength(1)
+  })
 
   it('opens a large dialog on Verify and moves the report into it', async () => {
     const { panel, report } = await openReport()

@@ -5,6 +5,7 @@ import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
 import { RemoteCameraFeed } from '../../features/onboarding/RemoteCameraFeed'
 import { RemoteFaceCapture } from '../../features/onboarding/RemoteFaceCapture'
 import { VerificationModal } from './VerificationModal'
+import { MethodPicker } from './MethodPicker'
 import { runStatusSentence } from './statusDisplay'
 
 /**
@@ -21,16 +22,16 @@ import { runStatusSentence } from './statusDisplay'
  * fewer than it does.
  *
  * The run and its report live in `VerificationModal`: pressing Verify opens it
- * and starts the check, and the panel keeps only what has to be chosen or
- * supplied before that — method, inputs, the button, and the sentence saying
- * why it cannot be pressed yet. Once a run exists, "Open report" brings the
- * dialog back without spending another call.
+ * and starts the check, and the panel keeps the method, the inputs, the
+ * button, and the sentence saying why it cannot be pressed yet — all of which
+ * the dialog repeats, so a method can be changed and re-run from inside the
+ * report too. Once a run exists, "Open report" brings the dialog back without
+ * spending another call.
  */
 export function VerificationMethodPanel() {
   const {
     methods,
     selected,
-    select,
     blockingReason,
     canVerify,
     verifying,
@@ -55,64 +56,19 @@ export function VerificationMethodPanel() {
           Choose how your identity should be checked.
         </p>
 
-        {methods.length === 0 ? (
-          <p className="text-ink-subtle mt-4 text-xs" role="status">
-            Loading the verification methods…
-          </p>
-        ) : (
-          <div className="mt-4">
-            <label className="block" htmlFor="verification-method-select">
-              <span className="text-ink-muted block text-xs font-medium">Method</span>
-              <select
-                aria-label="Verification method"
-                className="border-border bg-surface text-ink focus:border-brand mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                id="verification-method-select"
-                name="verification-method"
-                onChange={(event) =>
-                  select(event.target.value as (typeof methods)[number]['method'])
-                }
-                value={selected ?? ''}
-              >
-                {methods.map((method) => (
-                  <option key={method.method} value={method.method}>
-                    {method.label} — {method.officialName}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <MethodPicker className="mt-4" id="verification-method-select" />
 
-            {selected ? (
-              <div className="border-border bg-surface-sunken mt-3 rounded-lg border p-3">
-                {(() => {
-                  const method = methods.find((m) => m.method === selected)
-                  if (!method) return null
-                  const runnable = method.available && !method.isOcr
-                  return (
-                    <>
-                      <p className="text-sm font-semibold">{method.label}</p>
-                      <p className="text-ink-subtle block text-xs">{method.officialName}</p>
-                      <RequiresList method={method} />
-                      {!runnable && method.unavailableReason ? (
-                        <span className="text-ink-subtle mt-1 block text-xs leading-relaxed">
-                          {method.unavailableReason}
-                        </span>
-                      ) : null}
-                    </>
-                  )
-                })()}
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        {chosen?.requiresCurrentFace ? (
+        {/* While the dialog is open its first column carries the customer
+            display instead — the same components, rendered once, so there is
+            one teller screen (and one socket) rather than two. */}
+        {!reportOpen && chosen?.requiresCurrentFace ? (
           <>
             <RemoteFaceCapture />
             <FaceCapturePanel />
           </>
         ) : null}
 
-        {chosen?.requiresLiveness ? <RemoteCameraFeed /> : null}
+        {!reportOpen && chosen?.requiresLiveness ? <RemoteCameraFeed /> : null}
 
         <button
           className="btn-primary mt-4 w-full"
@@ -157,32 +113,5 @@ export function VerificationMethodPanel() {
 
       {reportOpen ? <VerificationModal onClose={() => setReportOpen(false)} /> : null}
     </>
-  )
-}
-
-/** What this method asks for, in the user's words (§10). */
-function RequiresList({
-  method,
-}: {
-  method: {
-    requiresUserInfo: boolean
-    requiresCurrentFace: boolean
-    requiresIdCard: boolean
-    requiresLiveness: boolean
-    requiresPassport: boolean
-  }
-}) {
-  const needs = [
-    method.requiresUserInfo && 'identity information',
-    method.requiresCurrentFace && 'your current face',
-    method.requiresIdCard && 'your ID card',
-    method.requiresLiveness && 'liveness',
-    method.requiresPassport && 'your passport',
-  ].filter(Boolean) as string[]
-
-  return (
-    <span className="text-ink-subtle mt-1 block text-xs">
-      {needs.length > 0 ? `Needs: ${needs.join(', ')}.` : 'Needs nothing else.'}
-    </span>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FieldCheckList } from './FieldCheckList'
+import { MethodPicker } from './MethodPicker'
 import { PostToCoreAction } from './PostToCoreAction'
 import { sectionsOf } from './sectionRows'
 import { runStatusSentence } from './statusDisplay'
@@ -23,7 +24,10 @@ import { VerificationPreview } from './VerificationPreview'
  *    in and out (§32 still pairs it with the cross and the word, so the pulse
  *    is a nudge, never the only signal).
  *
- * The columns: one by default, two once the method was given a picture or a
+ * The dialog is also where the run is *chosen*: it carries the same method
+ * dropdown the panel opens with and its own Verify, both bound to the one
+ * provider, so a method can be swapped and re-run without going back. The
+ * columns: one by default, two once the method was given a picture or a
  * recording — those runs get the preview column first and the field list
  * beside it (§24). "Post to Core Systems" lives in the footer and is not
  * rendered until the run has answered and the list has finished appending, so
@@ -34,7 +38,18 @@ import { VerificationPreview } from './VerificationPreview'
 const REVEAL_STEP_MS = 50
 
 export function VerificationModal({ onClose }: { readonly onClose: () => void }) {
-  const { methods, selected, verifying, result, history, error, inputs } = useVerification()
+  const {
+    methods,
+    selected,
+    blockingReason,
+    canVerify,
+    verifying,
+    verify,
+    result,
+    history,
+    error,
+    inputs,
+  } = useVerification()
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const chosen = methods.find((method) => method.method === selected) ?? null
@@ -94,6 +109,18 @@ export function VerificationModal({ onClose }: { readonly onClose: () => void })
           ) : null}
 
           <div className="min-w-0">
+            {/* Choose here, not behind the dialog: one provider drives both
+                copies of this control, so the panel agrees with the dialog. */}
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold">Verification method</h3>
+              <MethodPicker className="mt-2" id="verification-method-select-modal" />
+              {blockingReason ? (
+                <p className="text-ink-subtle mt-2 text-xs leading-relaxed" role="status">
+                  {blockingReason}
+                </p>
+              ) : null}
+            </div>
+
             {error ? (
               <p
                 className="border-negative bg-negative-soft text-negative mb-3 rounded-lg border px-3 py-2 text-xs"
@@ -157,6 +184,16 @@ export function VerificationModal({ onClose }: { readonly onClose: () => void })
                 type="button"
               >
                 Close
+              </button>
+              {/* The run can be started from here too: same `verify`, same
+                  `canVerify`, as the panel's own button. */}
+              <button
+                className="btn-primary px-4 py-1.5"
+                disabled={!canVerify || verifying}
+                onClick={() => void verify()}
+                type="button"
+              >
+                {verifying ? 'Checking…' : 'Verify'}
               </button>
               {complete ? <PostToCoreAction className="btn-primary px-4 py-1.5" /> : null}
             </div>
