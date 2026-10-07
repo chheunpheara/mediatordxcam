@@ -35,9 +35,10 @@ docker compose up --build
 
 **Two containers, two ports, one origin for the browser.** `frontend` builds the
 SPA and serves it with nginx on :3000, proxying `/api`, `/health`,
-`/health/ready`, `/docs` and `/openapi.json` to `app` on :8000. The browser only
-addresses :3000, so the product stays single-origin from its point of view and
-needs no CORS configuration (§30). `app` is API-only and ships no static files.
+`/health/ready`, `/docs`, `/openapi.json` and the `/ws` relay to `app` on :8000.
+The browser only addresses :3000, so the product stays single-origin from its
+point of view and needs no CORS configuration (§30). `app` is API-only and ships
+no static files.
 
 **PostgreSQL starts with the stack** (D13): it is the sample identity registry
 verification compares against, so `app` waits for it to become healthy and is
@@ -216,7 +217,7 @@ The default stack is two containers on two ports:
 
 ```text
 browser ──► frontend :3000 (nginx: SPA + reverse proxy)
-                 │  /api, /health, /health/ready, /docs, /openapi.json
+                 │  /api, /health, /health/ready, /docs, /openapi.json, /ws
                  ▼
               app :8000 (FastAPI, API only — no static files)
                  │
@@ -239,6 +240,9 @@ Constraints the nginx config already encodes and any replacement must keep:
   be traced (§28).
 - `/health` and `/docs` are proxied explicitly — the SPA fallback would otherwise
   answer them with HTML, which reads as healthy-but-wrong to an orchestrator.
+- `/ws` is proxied with the upgrade headers (`Upgrade`, `Connection`) and a long
+  read timeout — the fallback would answer the handshake with HTML, the socket
+  would never open, and the teller screen would wait for webcam frames forever.
 - No `CAMDX_*` variable is passed to this container. It serves static files; it
   has no reason to hold a credential (§30).
 

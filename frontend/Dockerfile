@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # The browser-facing image of the default stack: builds the SPA and serves it
-# with nginx, proxying /api, /health and /docs to the backend container so the
-# product is single-origin from the browser's point of view (§30).
+# with nginx, proxying /api, /health, /docs and the /ws relay to the backend
+# container so the product is single-origin from the browser's point of view
+# (§30).
 #
 # Build context is the FRONTEND directory:
 #

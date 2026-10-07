@@ -117,7 +117,7 @@ docker compose down -v                # stop; -v also deletes biometric temp fil
 
 | Container | Port | Role |
 |---|---|---|
-| `frontend` | **:3000** | nginx — serves the SPA, proxies `/api`, `/health` and `/docs` to the backend |
+| `frontend` | **:3000** | nginx — serves the SPA, proxies `/api`, `/health`, `/docs` and the `/ws` relay to the backend |
 | `app` | **:8000** | FastAPI — the API only, no static files |
 
 The browser only ever addresses **:3000**, so the product is single-origin from
