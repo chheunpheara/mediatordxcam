@@ -71,20 +71,12 @@ export function CustomerDisplayPage() {
   const frameTimer = useRef<number | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const countdownTimer = useRef<number | null>(null)
-  // The socket handler is bound once (deps: sessionId), so it must read the
-  // webcam flag through a ref — a captured `webcamOn` would stay false
-  // forever and every `startRecording` would bounce instead of recording.
-  const webcamOnRef = useRef(false)
   // A `getUserMedia` already in flight, so a repeated command cannot open a
   // second stream on top of the first.
   const cameraRequestRef = useRef(false)
   // A `startRecording` that arrived before the camera was ready: fired the
   // moment the stream lands, so the customer never has to click anything.
   const pendingStartRef = useRef(false)
-
-  useEffect(() => {
-    webcamOnRef.current = webcamOn
-  }, [webcamOn])
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -241,16 +233,21 @@ export function CustomerDisplayPage() {
         break
       }
       case 'startRecording':
-        if (!webcamOnRef.current) {
-          // The camera is still opening (permission prompt, or the command
-          // beat `activateLiveness`): hold the start instead of refusing it.
-          pendingStartRef.current = true
-          setScreenState('liveness')
-          setNote('Starting the camera…')
-          enableWebcam()
+        // The stream itself is the readiness signal. `webcamOn` (state the
+        // handler cannot capture — it is bound once) turns true a render later
+        // than the stream lands, and a start arriving in that window would be
+        // held against a camera that is already on, with nothing left to fire
+        // it. The open stream, not the flag, says the recording can start.
+        if (streamRef.current) {
+          beginRecording()
           break
         }
-        beginRecording()
+        // The camera is still opening (permission prompt, or the command beat
+        // `activateLiveness`): hold the start instead of refusing it.
+        pendingStartRef.current = true
+        setScreenState('liveness')
+        setNote('Starting the camera…')
+        enableWebcam()
         break
       case 'cancelSession':
         pendingStartRef.current = false
