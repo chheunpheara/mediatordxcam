@@ -821,3 +821,93 @@ characters, with a configurable TTL (default 900s) and a background sweep
 (default every 60s). Reading an expired artefact deletes it immediately rather
 than waiting for the next sweep, and a stopped container sweeps and clears on
 shutdown so a volume outliving the container holds nothing.
+
+---
+
+## Dual-screen onboarding · R6, R7
+
+The customer monitor is not a fixed page. Each officer mints a **link** per
+customer — a URL for the second monitor plus a secret token generated once
+behind `?session=`, never rewritten — and the teller tab joins the same link to
+drive that screen over `WS /ws/onboarding/{token}`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/v1/onboarding/liveness-links?scope=own` | Your links, newest first, expired ones included |
+| `GET` | `/api/v1/onboarding/liveness-links?scope=all` | Administrator read-only: every officer's links |
+| `POST` | `/api/v1/onboarding/liveness-links` | Mint one link for a named customer |
+| `POST` | `/api/v1/onboarding/sessions` | Ad-hoc room for a dashboard with no link open |
+| `WS` | `/ws/onboarding/{token}?role=teller\|customer` | The relay room itself |
+
+Two rules the server keeps on its own: **one usable link per officer** — a new
+mint sets `supersededAt` on the previous one — and **status is derived per
+request** from `expiresAt` and `supersededAt`, so no row can claim to be live
+after a restart. There is no update or delete route: a token is issued once and
+served unchanged for its whole life.
+
+**`GET /api/v1/onboarding/liveness-links`** — `200`
+
+```json
+{
+  "links": [
+    {
+      "id": "lnk_0a1b2c3d",
+      "customer": "Sok Dara",
+      "token": "sess_9f2c…",
+      "status": "in_use",
+      "createdAt": "2026-10-07T08:00:00Z",
+      "expiresAt": "2026-10-07T16:00:00Z",
+      "supersededAt": null,
+      "owner": { "id": "user_51a2…", "name": "Sok Dara" }
+    }
+  ]
+}
+```
+
+`status` is one of `in_use`, `superseded`, `expired`. `token` is `null` for any
+link another officer owns — the metadata still lists, the secret does not.
+`scope=all` on a non-administrator is `403 FORBIDDEN`.
+
+**`POST /api/v1/onboarding/liveness-links`** — `201`
+
+```json
+{ "customer": "Sok Dara", "durationSeconds": 14400 }
+```
+
+or an absolute end instead of a duration:
+
+```json
+{ "customer": "Sok Dara", "expiresAt": "2026-10-08T09:00:00Z" }
+```
+
+**Response `201`**
+
+```json
+{
+  "link": { "id": "lnk_77b1…", "customer": "Sok Dara", "token": "sess_1c4e…", "status": "in_use", "createdAt": "2026-10-07T12:00:00Z", "expiresAt": "2026-10-07T16:00:00Z", "supersededAt": null, "owner": { "id": "user_51a2…", "name": "Sok Dara" } },
+  "supersededPrevious": true
+}
+```
+
+`supersededPrevious` says an already-handed-out URL stopped working because of
+this mint. A blank `customer`, a past `expiresAt` or a duration beyond the
+30-day ceiling is `400 INVALID_REQUEST` with `error.fieldErrors`, and a custom
+time that has already passed is refused the same way.
+
+### WebSocket close codes
+
+The handshake is **accepted first**, so the reason for a refusal arrives as a
+close code the browser can read — a close before `accept` would leave the peer
+unable to tell an expired link from a link that never existed.
+
+| Code | Meaning |
+|------|---------|
+| `4403` | The teller is not the owner of this link |
+| `4404` | No such room: unknown token, or a server restart |
+| `4410` | The link has expired |
+| `4411` | The link was superseded by a newer one |
+
+The customer screen shuts its camera down and shows the sentence; the teller
+panel keeps its state and names what happened. The customer role is anonymous
+(the token *is* the credential); a teller must be the link's own owner, and
+frames relay only within that one room.

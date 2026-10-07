@@ -4,12 +4,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const openOnboardingSocket = vi.hoisted(() => vi.fn())
 
-vi.mock('../features/onboarding/onboardingSocket', () => ({
+vi.mock('../features/onboarding/onboardingSocket', async (importOriginal) => ({
+  // The real refusal wording stays in place — only the socket is faked.
+  ...(await importOriginal<typeof OnboardingSocketModule>()),
   openOnboardingSocket,
 }))
 
 import { CustomerDisplayPage } from './CustomerDisplay'
 import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
+import type * as OnboardingSocketModule from '../features/onboarding/onboardingSocket'
+
 
 /**
  * Screen B is hands-free: the teller's `activateLiveness` opens the webcam by
@@ -26,13 +30,25 @@ function renderAt(path: string) {
   )
 }
 
-/** Mount the page with a captured socket handler and its `send` spy. */
+/**
+ * Mount the page with a captured socket handler, its `send` spy, and the
+ * close callback the relay uses to report a refusal.
+ */
 async function mountDisplay() {
   const send = vi.fn()
-  const story: { h: ((envelope: OnboardingEnvelope) => void) | null } = { h: null }
+  const story: {
+    h: ((envelope: OnboardingEnvelope) => void) | null
+    onClose: ((code: number) => void) | null
+  } = { h: null, onClose: null }
   openOnboardingSocket.mockImplementation(
-    (_id: string, _role: string, onMessage: (envelope: OnboardingEnvelope) => void) => {
+    (
+      _id: string,
+      _role: string,
+      onMessage: (envelope: OnboardingEnvelope) => void,
+      onClose?: (code: number) => void,
+    ) => {
       story.h = onMessage
+      story.onClose = onClose ?? null
       return { send, close: vi.fn() }
     },
   )
@@ -204,6 +220,37 @@ describe('CustomerDisplayPage', () => {
     expect(await screen.findByRole('img', { name: 'Welcome' })).toBeInTheDocument()
     expect(camera.stopTrack).toHaveBeenCalled()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shuts the camera and takes over with one sentence when the link ends', async () => {
+    const camera = stubCamera()
+    const { story } = await mountDisplay()
+
+    story.h?.({ type: 'activateLiveness' })
+    camera.open()
+    await waitFor(() =>
+      expect(
+        screen.getByText('Hold still — the teller will start the check.'),
+      ).toBeInTheDocument(),
+    )
+
+    // The server closed the room: expired, replaced, or never known.
+    story.onClose?.(4410)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This link has expired. Please ask the officer for a new one.',
+    )
+    // A camera left on behind an error page is a camera nobody was told is on.
+    expect(camera.stopTrack).toHaveBeenCalled()
+    expect(screen.queryByRole('img', { name: 'Welcome' })).toBeNull()
+  })
+
+  it('says nothing when this tab closes the socket itself', async () => {
+    const { story } = await mountDisplay()
+
+    story.onClose?.(1000)
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('closes the camera once the clip is accepted and reopens it for a re-record', async () => {

@@ -3,12 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const openOnboardingSocket = vi.hoisted(() => vi.fn())
 
-vi.mock('../features/onboarding/onboardingSocket', () => ({
+vi.mock('../features/onboarding/onboardingSocket', async (importOriginal) => ({
+  // The real refusal wording stays in place — only the socket is faked.
+  ...(await importOriginal<typeof OnboardingSocketModule>()),
   openOnboardingSocket,
 }))
 
 import { TellerDashboard } from './TellerDashboard'
 import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
+import type * as OnboardingSocketModule from '../features/onboarding/onboardingSocket'
+
+import { makeLivenessLink } from '../test/fixtures'
 
 /**
  * Screen A: opens the customer's tab, activates its webcam and shows the
@@ -23,7 +28,7 @@ function stubSettings() {
     'fetch',
     vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ enabled: true, sessionId: 'sess_fixed_1' }), {
+        new Response(JSON.stringify({ links: [makeLivenessLink({ token: 'sess_fixed_1' })] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -97,6 +102,7 @@ describe('TellerDashboard', () => {
     expect(openOnboardingSocket).toHaveBeenCalledWith(
       'sess_fixed_1',
       'teller',
+      expect.any(Function),
       expect.any(Function),
     )
     expect(screen.getByText(/Waiting for the customer's camera…/)).toBeInTheDocument()

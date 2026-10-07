@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { openOnboardingSocket } from './onboardingSocket'
+import { onboardingRefusalMessage, openOnboardingSocket } from './onboardingSocket'
 import type { OnboardingEnvelope } from './onboardingSocket'
 import { useLiveFrame } from './useLiveFrame'
 import { useFaceCapture } from '../face-capture/FaceCaptureContext'
-import { fetchLivenessPageSettings } from '../../lib/api'
+import { fetchActiveLivenessLink } from '../../lib/api'
 
 /**
  * The customer display's camera, taken from here for the current-face photo.
@@ -30,7 +30,7 @@ import { fetchLivenessPageSettings } from '../../lib/api'
  */
 export function RemoteFaceCapture() {
   const { capture, faceRef } = useFaceCapture()
-  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [hasLink, setHasLink] = useState<boolean | null>(null)
   const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
   const [taking, setTaking] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -65,16 +65,27 @@ export function RemoteFaceCapture() {
   useEffect(() => {
     let done = false
 
-    fetchLivenessPageSettings()
-      .then((settings) => {
+    fetchActiveLivenessLink()
+      .then((link) => {
         if (done) return
-        setEnabled(settings.enabled)
-        if (!settings.enabled) return
-        const socket = openOnboardingSocket(settings.sessionId, 'teller', handleTellerEvent)
+        setHasLink(link !== null && link.token !== null)
+        if (link === null || link.token === null) return
+        const socket = openOnboardingSocket(
+          link.token,
+          'teller',
+          handleTellerEvent,
+          (code) => {
+            const message = onboardingRefusalMessage(code, 'teller')
+            if (message === null) return
+            setTaking(false)
+            setNote(message)
+            setNoteIsError(true)
+          },
+        )
         socketRef.current = socket
         askForCamera()
       })
-      .catch(() => setEnabled(false))
+      .catch(() => setHasLink(false))
     return () => {
       done = true
       socketRef.current?.close()
@@ -139,7 +150,7 @@ export function RemoteFaceCapture() {
     socketRef.current?.send({ type: 'capturePhoto' })
   }
 
-  if (enabled === null) {
+  if (hasLink === null) {
     return (
       <p className="text-ink-subtle text-xs" role="status">
         Contacting the customer display…
@@ -147,10 +158,10 @@ export function RemoteFaceCapture() {
     )
   }
 
-  if (!enabled) {
+  if (!hasLink) {
     return (
       <p className="text-ink-subtle text-xs">
-        No fixed customer display is enabled yet. Open the Liveness Page settings to configure one.
+        No liveness link is open yet. Create one to reach the customer screen.
       </p>
     )
   }

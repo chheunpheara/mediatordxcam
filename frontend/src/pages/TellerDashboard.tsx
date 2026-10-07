@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { openOnboardingSocket } from '../features/onboarding/onboardingSocket'
+import { onboardingRefusalMessage, openOnboardingSocket } from '../features/onboarding/onboardingSocket'
 import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
 import { useLiveFrame } from '../features/onboarding/useLiveFrame'
+import { fetchActiveLivenessLink } from '../lib/api'
 
 /**
  * Screen A (teller dashboard).
@@ -34,15 +35,13 @@ export function TellerDashboard() {
   }
 
   useEffect(() => {
-    // Fixed token: GET liveness settings. We deliberately do not POST new
-    // the onboarding socket. Fallback to POST only when not enabled, so the
-    // dashboard remains functional in checks where the admin form isn't set.
-    fetch('/api/v1/onboarding/liveness-page')
-      .then((response) => response.json())
-      .then((body: { enabled?: boolean; sessionId?: string }) => {
-        if (!body.enabled) return fallbackCreateAdhocSession()
-        if (!body.sessionId) return
-        setSessionId(body.sessionId)
+    // The officer's open link, if there is one: the customer monitor is
+    // already on that URL, so this tab joins the same room. Otherwise mint an
+    // ad-hoc session, so the dashboard stays usable before any link exists.
+    fetchActiveLivenessLink()
+      .then((link) => {
+        if (link?.token) setSessionId(link.token)
+        else fallbackCreateAdhocSession()
       })
       .catch(() => fallbackCreateAdhocSession())
   }, [])
@@ -68,7 +67,10 @@ export function TellerDashboard() {
           break
       }
     }
-    socketRef.current = openOnboardingSocket(sessionId, 'teller', handle)
+    socketRef.current = openOnboardingSocket(sessionId, 'teller', handle, (code) => {
+      const message = onboardingRefusalMessage(code, 'teller')
+      if (message !== null) setError(message)
+    })
     return () => {
       socketRef.current?.close()
       socketRef.current = null

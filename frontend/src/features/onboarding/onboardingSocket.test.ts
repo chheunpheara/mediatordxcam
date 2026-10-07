@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { openOnboardingSocket } from './onboardingSocket'
+import { onboardingRefusalMessage, openOnboardingSocket } from './onboardingSocket'
 import type { OnboardingEnvelope } from './onboardingSocket'
 
 /**
@@ -22,6 +22,7 @@ class FakeWebSocket {
   readonly sent: string[] = []
   onopen: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
+  onclose: ((event: { readonly code: number }) => void) | null = null
   closed = false
 
   constructor(readonly url: string) {
@@ -44,6 +45,12 @@ class FakeWebSocket {
   finishOpen(): void {
     this.readyState = FakeWebSocket.OPEN
     this.onopen?.()
+  }
+
+  /** Test-side: the server ended the room with a close code. */
+  serverClose(code: number): void {
+    this.readyState = FakeWebSocket.CLOSED
+    this.onclose?.({ code })
   }
 }
 
@@ -102,7 +109,50 @@ describe('openOnboardingSocket', () => {
 
     expect(lastSocket().closed).toBe(true)
     expect(lastSocket().onmessage).toBeNull()
+    expect(lastSocket().onclose).toBeNull()
     lastSocket().finishOpen()
     expect(lastSocket().sent).toHaveLength(0)
+  })
+
+  it('hands the server close code back to the caller', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const onClose = vi.fn()
+    openOnboardingSocket('sess_fixed_1', 'customer', vi.fn(), onClose)
+
+    lastSocket().serverClose(4410)
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledWith(4410)
+  })
+
+  it('reports nothing for a close this tab performed itself', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const onClose = vi.fn()
+    const socket = openOnboardingSocket('sess_fixed_1', 'teller', vi.fn(), onClose)
+
+    socket.close()
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('onboardingRefusalMessage', () => {
+  it('tells the customer to ask for a fresh link', () => {
+    expect(onboardingRefusalMessage(4410, 'customer')).toMatch(/expired/i)
+    expect(onboardingRefusalMessage(4411, 'customer')).toMatch(/replaced/i)
+    expect(onboardingRefusalMessage(4404, 'customer')).toMatch(/ask the officer/i)
+  })
+
+  it('tells the officer what to do about the room', () => {
+    expect(onboardingRefusalMessage(4410, 'teller')).toMatch(/expired/i)
+    expect(onboardingRefusalMessage(4411, 'teller')).toMatch(/newer link/i)
+    expect(onboardingRefusalMessage(4404, 'teller')).toMatch(/reload/i)
+    expect(onboardingRefusalMessage(4403, 'teller')).toMatch(/another officer/i)
+  })
+
+  it('says nothing about an ordinary close', () => {
+    expect(onboardingRefusalMessage(1000, 'teller')).toBeNull()
+    expect(onboardingRefusalMessage(1006, 'customer')).toBeNull()
+    expect(onboardingRefusalMessage(4403, 'customer')).toBeNull()
   })
 })

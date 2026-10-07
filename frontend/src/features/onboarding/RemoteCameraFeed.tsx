@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { openOnboardingSocket } from './onboardingSocket'
+import { onboardingRefusalMessage, openOnboardingSocket } from './onboardingSocket'
 import type { OnboardingEnvelope } from './onboardingSocket'
 import { useLiveFrame } from './useLiveFrame'
 import { useLiveness } from '../liveness/LivenessContext'
-import { artifactUrl, fetchLivenessPageSettings } from '../../lib/api'
+import { artifactUrl, fetchActiveLivenessLink } from '../../lib/api'
 
 /**
  * In-browser live feed of the separate customer display tab (Phase 7).
  *
- * The workspace links to the fixed liveness page as a *sender* of the
- * activation command; frames flow countermand it back as teller-side events.
+ * The workspace joins the officer's current liveness link as a *sender* of
+ * the activation command; frames flow countermand it back as teller-side
+ * events. The link is fetched, not configured here: one minted link is all
+ * this panel needs, and it is the same one the customer monitor opens.
  * There is no local camera UI: the customer is the person proving liveness.
  *
  * "Start liveness check" queues the 3-second recording on the customer
@@ -38,7 +40,7 @@ export function RemoteCameraFeed({
   readonly hideClip?: boolean
 } = {}) {
   const { adopt, livenessRef } = useLiveness()
-  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [hasLink, setHasLink] = useState<boolean | null>(null)
   const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
   const [recording, setRecording] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -72,18 +74,31 @@ export function RemoteCameraFeed({
       socketRef.current?.send({ type: 'activateLiveness' })
     }
 
-    fetchLivenessPageSettings()
-      .then((settings) => {
+    fetchActiveLivenessLink()
+      .then((link) => {
         if (done) return
-        setEnabled(settings.enabled)
-        if (!settings.enabled) return
-        const socket = openOnboardingSocket(settings.sessionId, 'teller', (envelope) => {
-          handleTellerEvent(envelope)
-        })
+        setHasLink(link !== null && link.token !== null)
+        if (link === null || link.token === null) return
+        const socket = openOnboardingSocket(
+          link.token,
+          'teller',
+          (envelope) => {
+            handleTellerEvent(envelope)
+          },
+          (code) => {
+            // The room ended under us — expired, replaced, or another
+            // officer's link. Say which, and leave the feed as it is.
+            const message = onboardingRefusalMessage(code, 'teller')
+            if (message === null) return
+            setRecording(false)
+            setNote(message)
+            setNoteIsError(true)
+          },
+        )
         socketRef.current = socket
         askForCamera()
       })
-      .catch(() => setEnabled(false))
+      .catch(() => setHasLink(false))
     return () => {
       done = true
       socketRef.current?.close()
@@ -127,7 +142,7 @@ export function RemoteCameraFeed({
     }
   }, [acceptFrame])
 
-  if (enabled === null) {
+  if (hasLink === null) {
     return (
       <p className="text-ink-subtle text-xs" role="status">
         Contacting the customer display…
@@ -135,10 +150,10 @@ export function RemoteCameraFeed({
     )
   }
 
-  if (!enabled) {
+  if (!hasLink) {
     return (
       <p className="text-ink-subtle text-xs">
-        No fixed customer display is enabled yet. Open the Liveness Page settings to configure one.
+        No liveness link is open yet. Create one to reach the customer screen.
       </p>
     )
   }

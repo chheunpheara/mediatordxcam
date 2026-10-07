@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { openOnboardingSocket } from '../features/onboarding/onboardingSocket'
+import { onboardingRefusalMessage, openOnboardingSocket } from '../features/onboarding/onboardingSocket'
 import type { CustomerUiState, OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
 import { verifyLiveness } from '../lib/api'
 import { pickMimeType } from '../features/liveness/mimeTypes'
@@ -41,6 +41,11 @@ import { LivenessArt } from '../components/liveness/LivenessArt'
  *
  * `cancelSession` (teller clicking "Reset session" or the room expiring) rips
  * down tracks and recorder timers and returns to the welcome screen.
+ *
+ * The link itself can end under this screen — expired, replaced by a newer
+ * one, unknown after a restart. The server says which by closing the socket
+ * with a refusal code, and this page then shuts the camera down and takes over
+ * with one plain sentence: no command can arrive on a room that is gone.
  */
 
 const FRAME_INTERVAL_MS = 80 // ~12 fps; JPEG base64 sized for a modern web link
@@ -63,6 +68,10 @@ export function CustomerDisplayPage() {
   // Which teller command opened the camera: the hint below promises a
   // recording or a photo, and only the teller switches between them.
   const [purpose, setPurpose] = useState<'liveness' | 'photo'>('liveness')
+  // Why the room closed, as a sentence for the customer — null while the link
+  // is still alive. Set only from a refusal code, never from this tab's own
+  // close, so navigating away never shows an error.
+  const [refusal, setRefusal] = useState<string | null>(null)
   // The last frame the camera saw, kept on the oval after it closes.
   const [snapshot, setSnapshot] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -327,7 +336,23 @@ export function CustomerDisplayPage() {
 
   useEffect(() => {
     if (!sessionId) return
-    socketRef.current = openOnboardingSocket(sessionId, 'customer', handleMessage)
+    socketRef.current = openOnboardingSocket(
+      sessionId,
+      'customer',
+      handleMessage,
+      (code) => {
+        const message = onboardingRefusalMessage(code, 'customer')
+        if (message === null) return
+        // The room is gone, so nothing can re-open the camera: shut it down
+        // now rather than leaving a camera on behind an error page.
+        stopRecorder()
+        stopFrames()
+        stopStream()
+        setWebcamOn(false)
+        setRecording(false)
+        setRefusal(message)
+      },
+    )
     return () => {
       stopRecorder()
       stopFrames()
@@ -341,7 +366,12 @@ export function CustomerDisplayPage() {
     <main
       className="bg-white text-ink flex min-h-screen flex-col items-center justify-center p-3 text-center"
     >
-      {screenState === 'welcome' ? (
+      {refusal !== null ? (
+        <section className="w-full max-w-xl px-4 py-8" role="alert">
+          <h1 className="text-lg font-semibold">This link is no longer open</h1>
+          <p className="text-ink-muted mt-3 text-sm">{refusal}</p>
+        </section>
+      ) : screenState === 'welcome' ? (
         <LivenessArt />
       ) : (
         <section className="w-full max-w-xl">

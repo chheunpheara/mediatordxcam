@@ -7,7 +7,9 @@ const faceCapture = vi.hoisted(() => ({
   faceRef: null as string | null,
 }))
 
-vi.mock('./onboardingSocket', () => ({
+vi.mock('./onboardingSocket', async (importOriginal) => ({
+  // The real refusal wording stays in place — only the socket is faked.
+  ...(await importOriginal<typeof OnboardingSocketModule>()),
   openOnboardingSocket,
 }))
 vi.mock('../face-capture/FaceCaptureContext', () => ({
@@ -23,6 +25,9 @@ vi.mock('../face-capture/FaceCaptureContext', () => ({
 
 import { RemoteFaceCapture } from './RemoteFaceCapture'
 import type { OnboardingEnvelope } from './onboardingSocket'
+import type * as OnboardingSocketModule from './onboardingSocket'
+
+import { makeLivenessLink } from '../../test/fixtures'
 
 /**
  * The teller-side shutter for the customer's photo (Phase 7). Choosing a
@@ -33,7 +38,7 @@ import type { OnboardingEnvelope } from './onboardingSocket'
  * the panel's own camera would have uploaded it.
  */
 
-const SETTINGS = { enabled: true, sessionId: 'sess_fixed_1' }
+const LINKS = { links: [makeLivenessLink({ token: 'sess_fixed_1' })] }
 
 function stubSettings(payload: unknown, status = 200) {
   const mock = vi.fn(() =>
@@ -49,7 +54,7 @@ function stubSettings(payload: unknown, status = 200) {
 }
 
 async function mountWithStory() {
-  stubSettings(SETTINGS)
+  stubSettings(LINKS)
   const send = vi.fn()
   const story: { h: ((envelope: OnboardingEnvelope) => void) | null } = { h: null }
   openOnboardingSocket.mockImplementation(
@@ -119,7 +124,7 @@ afterEach(() => {
 
 describe('RemoteFaceCapture', () => {
   it('opens the customer camera as soon as the method needs a face', async () => {
-    stubSettings(SETTINGS)
+    stubSettings(LINKS)
     const send = vi.fn()
     openOnboardingSocket.mockReturnValue({ send, close: vi.fn() })
 
@@ -130,6 +135,7 @@ describe('RemoteFaceCapture', () => {
       'sess_fixed_1',
       'teller',
       expect.any(Function),
+      expect.any(Function),
     )
     expect(send).toHaveBeenCalledWith({ type: 'activateFaceCapture' })
     expect(
@@ -139,7 +145,7 @@ describe('RemoteFaceCapture', () => {
 
   it('does not open a camera that already has a photo', async () => {
     faceCapture.faceRef = 'art_taken'
-    stubSettings(SETTINGS)
+    stubSettings(LINKS)
     const send = vi.fn()
     openOnboardingSocket.mockReturnValue({ send, close: vi.fn() })
 
@@ -219,13 +225,13 @@ describe('RemoteFaceCapture', () => {
   })
 
   it('says so instead of opening a socket when no display is configured', async () => {
-    stubSettings({ enabled: false, sessionId: '' })
+    stubSettings({ links: [] })
     openOnboardingSocket.mockReturnValue({ send: vi.fn(), close: vi.fn() })
 
     render(<RemoteFaceCapture />)
 
     expect(
-      await screen.findByText(/No fixed customer display is enabled yet/i),
+      await screen.findByText(/No liveness link is open yet/i),
     ).toBeInTheDocument()
     expect(openOnboardingSocket).not.toHaveBeenCalled()
   })

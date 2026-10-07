@@ -12,12 +12,18 @@ import {
   TEST_AUTH_USER,
   VERIFICATION_METHODS,
   bodyOf,
+  makeLivenessLink,
   makeProcessingResult,
   makeVerifyResult,
   stubKycFetch,
   urlOf,
 } from '@/test/fixtures'
-import type { ProcessIdCardResponse, VerificationMethod, VerifyResponse } from '@/lib/api'
+import type {
+  LivenessLink,
+  ProcessIdCardResponse,
+  VerificationMethod,
+  VerifyResponse,
+} from '@/lib/api'
 
 /**
  * The verification method panel (§9, §10, §11).
@@ -62,9 +68,9 @@ async function renderWorkspace(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods?: readonly VerificationMethod[],
   verifyResult?: VerifyResponse | VerifyResponse[],
-  livenessPage?: { readonly enabled: boolean; readonly sessionId: string },
+  livenessLinks?: readonly LivenessLink[],
 ) {
-  const fetchMock = stubKycFetch(result, methods, verifyResult, livenessPage)
+  const fetchMock = stubKycFetch(result, methods, verifyResult, livenessLinks)
   const view = renderAt('/')
 
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
@@ -184,7 +190,7 @@ describe('the six methods (§9, §10)', () => {
       'verify_user_info_idcard_liveness',
     )
     expect(
-      await within(panel).findByText(/No fixed customer display is enabled yet/i),
+      await within(panel).findByText(/No liveness link is open yet/i),
     ).toBeInTheDocument()
   })
 
@@ -195,7 +201,7 @@ describe('the six methods (§9, §10)', () => {
 
     // A method that never mentions the customer's face never mentions the
     // customer display either — the feed is a rendering of the requirements.
-    expect(within(panel).queryByText(/No fixed customer display is enabled yet/i)).toBeNull()
+    expect(within(panel).queryByText(/No liveness link is open yet/i)).toBeNull()
 
     await userEvent.selectOptions(
       await within(panel).findByRole('combobox', { name: 'Verification method' }),
@@ -203,7 +209,7 @@ describe('the six methods (§9, §10)', () => {
     )
 
     expect(
-      await within(panel).findByText(/No fixed customer display is enabled yet/i),
+      await within(panel).findByText(/No liveness link is open yet/i),
     ).toBeInTheDocument()
     // The teller's own camera and upload stay exactly where they were.
     expect(within(panel).getByRole('button', { name: 'Use camera' })).toBeInTheDocument()
@@ -221,7 +227,7 @@ describe('the six methods (§9, §10)', () => {
     )
 
     expect(
-      await within(panel).findByText(/No fixed customer display is enabled yet/i),
+      await within(panel).findByText(/No liveness link is open yet/i),
     ).toBeInTheDocument()
     expect(within(panel).queryByRole('button', { name: 'Use camera' })).toBeNull()
     expect(within(panel).queryByRole('button', { name: 'Take photo' })).toBeNull()
@@ -580,7 +586,7 @@ describe('the report dialog (§24)', () => {
       makeProcessingResult(),
       undefined,
       verifyResult,
-      customerDisplay ? { enabled: true, sessionId: 'sess_test_1' } : undefined,
+      customerDisplay ? [makeLivenessLink({ token: 'sess_test_1' })] : undefined,
     )
 
     fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
@@ -678,7 +684,7 @@ describe('the report dialog (§24)', () => {
       await within(preview).findByRole('button', { name: 'Start liveness check' }),
     ).toBeInTheDocument()
     expect(within(panel).queryByRole('button', { name: 'Start liveness check' })).toBeNull()
-    expect(within(panel).queryByText(/No fixed customer display is enabled yet/i)).toBeNull()
+    expect(within(panel).queryByText(/No liveness link is open yet/i)).toBeNull()
 
     await waitFor(() =>
       expect(TestWebSocket.sent.some((raw) => raw.includes('activateLiveness'))).toBe(true),

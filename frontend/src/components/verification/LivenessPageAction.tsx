@@ -1,22 +1,19 @@
 import { useCallback, useState } from 'react'
 
-import { useAuthUser } from '../../features/auth/authContext'
 import { LivenessPageModal } from './LivenessPageModal'
 
 /**
- * The workspace header's "Liveness Page" button and its dialog.
+ * The workspace header's "Liveness Links" button and its dialog.
  *
- * Admin-only, matching the server rule that gates `PUT
- * /api/v1/onboarding/liveness-page` behind `require_admin`: an officer who
- * cannot save the setting only finds out after the dialog is open. The
- * monitor is inline SVG so the button needs no icon package.
+ * Every signed-in officer mints links — the route takes no admin gate, and
+ * hiding the button for anyone who could use it would only push them to the
+ * URL by hand. The dialog itself reads a scope toggle for administrators,
+ * so this button does not branch on the profile at all. The monitor is
+ * inline SVG so the button needs no icon package.
  */
 export function LivenessPageAction() {
-  const user = useAuthUser()
   const [open, setOpen] = useState(false)
   const onClose = useCallback(() => setOpen(false), [])
-
-  if (!user?.isAdmin) return null
 
   return (
     <>
@@ -38,7 +35,7 @@ export function LivenessPageAction() {
           <rect height="14" width="20" x="2" y="3" rx="2" />
           <path d="M8 21h8M12 17v4" />
         </svg>
-        Liveness Page
+        Liveness Links
       </button>
       {open ? <LivenessPageModal onClose={onClose} /> : null}
     </>

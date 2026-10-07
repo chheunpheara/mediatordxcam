@@ -35,12 +35,14 @@ def test_create_session(client: TestClient):
 
 
 def test_ws_unknown_session_closed(client: TestClient):
+    """Accepted first, then closed: a refusal during the handshake would reach
+    the browser as an opaque 1006 instead of this code."""
     session_id = client.post("/api/v1/onboarding/sessions").json()["sessionId"]
     with (
+        client.websocket_connect(f"/ws/onboarding/{session_id}x?role=customer") as customer,
         pytest.raises(WebSocketDisconnect) as excinfo,
-        client.websocket_connect(f"/ws/onboarding/{session_id}x?role=customer"),
     ):
-        pass
+        customer.receive_json()
     assert excinfo.value.code == 4404
 
 

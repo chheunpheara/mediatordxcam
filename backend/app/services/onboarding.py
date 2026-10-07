@@ -30,12 +30,20 @@ class OnboardingHub:
         self._lock = asyncio.Lock()
 
     async def join(self, session_id: str, role: Role, websocket: WebSocket) -> None:
-        await websocket.accept()
+        """Register the socket and hand it the handshake, as one critical step.
+
+        The two have to land together: a peer that can already see this socket
+        in the room must be able to talk to it, and a tab that is about to be
+        told `peerJoined` must be in the room before that message is collected.
+        The endpoint refuses sockets *before* calling this, so a socket is only
+        ever accepted here or on its way out with a close code.
+        """
         async with self._lock:
             room = self._rooms.setdefault(session_id, _Room())
             # Any number of teller tabs/workspace can watch the same room;
             # each client keeps one socket and leaves independently.
             room.members[role].add(websocket)
+            await websocket.accept()
 
     async def leave(self, session_id: str, role: Role, websocket: WebSocket) -> None:
         async with self._lock:

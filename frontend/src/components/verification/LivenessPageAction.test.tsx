@@ -6,18 +6,18 @@ import { writeAuthUser } from '../../lib/auth'
 import { TEST_AUTH_USER } from '../../test/fixtures'
 
 /**
- * The header button's display gate: it appears for an admin — the same
- * `require_admin` the server puts on `PUT /api/v1/onboarding/liveness-page`
- * — and is not rendered at all for a non-admin profile, who could only ever
- * meet a refusal after the dialog is already open.
+ * The header button's gate: every signed-in officer mints links — the route
+ * carries no `require_admin` — so the button renders for any profile. The
+ * administrator's read-only view of everyone else's links lives *inside* the
+ * dialog as a scope toggle, not as a different button for a different person.
  */
 
-function stubLivenessFetch() {
+function stubLinksFetch() {
   vi.stubGlobal(
     'fetch',
     vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ enabled: false, sessionId: 'sess_fixed_1' }), {
+        new Response(JSON.stringify({ links: [] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -32,21 +32,22 @@ afterEach(() => {
 })
 
 describe('LivenessPageAction', () => {
-  it('opens the liveness page dialog for an admin profile', async () => {
-    stubLivenessFetch()
+  it('opens the liveness links dialog', async () => {
+    stubLinksFetch()
     render(<LivenessPageAction />)
 
-    fireEvent.click(screen.getByRole('button', { name: /liveness page/i }))
+    fireEvent.click(screen.getByRole('button', { name: /liveness links/i }))
 
-    expect(await screen.findByRole('dialog', { name: 'Liveness page' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Liveness links' })).toBeInTheDocument()
   })
 
-  it('renders nothing for a non-admin profile', () => {
+  it('renders for a non-admin officer too — minting is theirs as well', async () => {
     writeAuthUser({ ...TEST_AUTH_USER, isAdmin: false })
+    stubLinksFetch()
+    render(<LivenessPageAction />)
 
-    const { container } = render(<LivenessPageAction />)
+    fireEvent.click(screen.getByRole('button', { name: /liveness links/i }))
 
-    expect(container).toBeEmptyDOMElement()
-    expect(screen.queryByRole('button', { name: /liveness page/i })).not.toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Liveness links' })).toBeInTheDocument()
   })
 })

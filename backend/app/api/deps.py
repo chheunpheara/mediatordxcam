@@ -11,14 +11,14 @@ same shape as the real thing.
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.domain.auth import ALL_PERMISSIONS, Role, User, UserStatus
-from app.infrastructure.liveness_settings_store import LivenessSettingsStore
+from app.infrastructure.liveness_link_store import LivenessLinkStore
 from app.integrations.camdx.mock.ocr import MockOcrProvider
 from app.integrations.camdx.ocr import OcrProvider
 from app.services.artifacts import TempArtifactStore
@@ -158,6 +158,20 @@ def kyc_service_provider(
 KycServiceDep = Annotated[KycService, Depends(kyc_service_provider)]
 
 
+def _auth_service_for(app: Any, settings: Settings) -> AuthService:
+    """The account service cached on `app.state`, built on first use.
+
+    Shared by the HTTP provider below and the WebSocket handler, which has an
+    app but no request. Construction touches the database, so callers on the
+    event loop wrap this in `asyncio.to_thread`.
+    """
+    cached: AuthService | None = getattr(app.state, "auth_service", None)
+    if cached is None:
+        cached = AuthService(settings)
+        app.state.auth_service = cached
+    return cached
+
+
 def auth_service_provider(request: Request, settings: SettingsDep) -> AuthService:
     """The account service (D18), built once per application.
 
@@ -166,11 +180,7 @@ def auth_service_provider(request: Request, settings: SettingsDep) -> AuthServic
     Construction touches the database, so callers that run on the event loop
     must wrap it in `asyncio.to_thread` (see `current_user` and `main.lifespan`).
     """
-    cached: AuthService | None = getattr(request.app.state, "auth_service", None)
-    if cached is None:
-        cached = AuthService(settings)
-        request.app.state.auth_service = cached
-    return cached
+    return _auth_service_for(request.app, settings)
 
 
 AuthServiceDep = Annotated[AuthService, Depends(auth_service_provider)]
@@ -192,7 +202,7 @@ async def current_user(request: Request, settings: SettingsDep) -> User:
     token = extract_session_token(request)
     if token is None:
         raise AppError(ErrorCode.UNAUTHENTICATED)
-    service = await asyncio.to_thread(auth_service_provider, request, settings)
+    service = await asyncio.to_thread(_auth_service_for, request.app, settings)
     user = await service.resolve(token)
     if user is None:
         raise AppError(
@@ -218,11 +228,12 @@ async def require_admin(user: CurrentUserDep) -> User:
 AdminUserDep = Annotated[User, Depends(require_admin)]
 
 
-def extract_session_token(request: Request) -> str | None:
+def extract_session_token(request: Request | WebSocket) -> str | None:
     """The bearer token from the `Authorization` header or the session cookie.
 
     Both are accepted: the browser relies on the `HttpOnly` cookie, while curl
-    and the backend tests send `Authorization: Bearer …`.
+    and the backend tests send `Authorization: Bearer …`. A WebSocket presents
+    the same two carriers, which is how `user_from_websocket` reads them.
     """
     header = request.headers.get("Authorization")
     if header:
@@ -230,6 +241,22 @@ def extract_session_token(request: Request) -> str | None:
         if scheme.lower() == "bearer" and value.strip():
             return value.strip()
     return request.cookies.get(SESSION_COOKIE)
+
+
+async def user_from_websocket(websocket: WebSocket, settings: Settings) -> User | None:
+    """The signed-in user behind a WebSocket, or `None` when it proves nothing.
+
+    Unlike `current_user` this never raises: the customer display legitimately
+    connects with no session at all, and it is the officer's side of a link
+    that has to be identified — the endpoint decides what to do about that.
+    """
+    if not settings.auth_enabled:
+        return _DEV_USER
+    token = extract_session_token(websocket)
+    if token is None:
+        return None
+    service = await asyncio.to_thread(_auth_service_for, websocket.app, settings)
+    return await service.resolve(token)
 
 
 def integration_service_provider(request: Request, settings: SettingsDep) -> IntegrationService:
@@ -248,17 +275,21 @@ def integration_service_provider(request: Request, settings: SettingsDep) -> Int
 IntegrationServiceDep = Annotated[IntegrationService, Depends(integration_service_provider)]
 
 
-def liveness_settings_provider(request: Request, settings: SettingsDep) -> LivenessSettingsStore:
-    cached: LivenessSettingsStore | None = getattr(
-        request.app.state, "liveness_settings_store", None
-    )
+def liveness_link_provider(request: Request, settings: SettingsDep) -> LivenessLinkStore:
+    """The per-customer link table, built once per application.
+
+    Cached on `app.state` like the account service; construction creates the
+    schema (and retires the table the fixed page used), so FastAPI runs this
+    sync provider in a worker thread.
+    """
+    cached: LivenessLinkStore | None = getattr(request.app.state, "liveness_link_store", None)
     if cached is None:
-        cached = LivenessSettingsStore(settings.database_url or "")
-        request.app.state.liveness_settings_store = cached
+        cached = LivenessLinkStore(settings.database_url or "")
+        request.app.state.liveness_link_store = cached
     return cached
 
 
-LivenessSettingsDep = Annotated[LivenessSettingsStore, Depends(liveness_settings_provider)]
+LivenessLinkDep = Annotated[LivenessLinkStore, Depends(liveness_link_provider)]
 
 
 def record_service_provider(request: Request, settings: SettingsDep) -> RecordService:

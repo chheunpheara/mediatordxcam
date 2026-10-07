@@ -679,22 +679,57 @@ export async function saveIntegrationSettings(
   return body.settings
 }
 
-/** The fixed liveness page: enabled, stable session token, and mirrored URL. */
-export interface LivenessPageSettings {
-  readonly enabled: boolean
-  readonly sessionId: string
+/** One per-customer liveness link (Phase 7 dual-screen). */
+export interface LivenessLink {
+  readonly id: string
+  readonly customer: string
+  /** The secret behind `?session=`; null for links another officer owns. */
+  readonly token: string | null
+  readonly status: 'in_use' | 'superseded' | 'expired'
+  readonly createdAt: string
+  readonly expiresAt: string
+  readonly supersededAt: string | null
+  readonly owner: { readonly id: string; readonly name: string }
 }
 
-/** `GET /api/v1/onboarding/liveness-page` — current fixed display location. */
-export async function fetchLivenessPageSettings(): Promise<LivenessPageSettings> {
-  return requestJson<LivenessPageSettings>('/api/v1/onboarding/liveness-page')
+/** The reply to minting one link: the row itself plus what it stopped. */
+export interface CreatedLivenessLink {
+  readonly link: LivenessLink
+  /** True when an already-handed-out URL stopped working because of this one. */
+  readonly supersededPrevious: boolean
 }
 
-/** `PUT /api/v1/onboarding/liveness-page` — admin manages enable/disable. */
-export async function saveLivenessPageSettings(enabled: boolean): Promise<LivenessPageSettings> {
-  return requestJson<LivenessPageSettings>(
-    '/api/v1/onboarding/liveness-page',
-    jsonInit('PUT', { enabled }),
+/**
+ * `GET /api/v1/onboarding/liveness-links` — your links, newest first.
+ *
+ * `scope: 'all'` is the administrator's read-only view: every officer's links
+ * with their metadata, and a `token` only where the link is yours.
+ */
+export async function fetchLivenessLinks(
+  scope: 'own' | 'all' = 'own',
+): Promise<readonly LivenessLink[]> {
+  const query = scope === 'own' ? '' : '?scope=all'
+  const body = await requestJson<{ readonly links: readonly LivenessLink[] }>(
+    `/api/v1/onboarding/liveness-links${query}`,
+  )
+  return body.links
+}
+
+/** The link the customer monitor should be open on right now, if any. */
+export async function fetchActiveLivenessLink(): Promise<LivenessLink | null> {
+  const links = await fetchLivenessLinks('own')
+  return links.find((link) => link.status === 'in_use') ?? null
+}
+
+/** `POST /api/v1/onboarding/liveness-links` — mint a link for one customer. */
+export async function createLivenessLink(input: {
+  readonly customer: string
+  readonly durationSeconds?: number
+  readonly expiresAt?: string
+}): Promise<CreatedLivenessLink> {
+  return requestJson<CreatedLivenessLink>(
+    '/api/v1/onboarding/liveness-links',
+    jsonInit('POST', input),
   )
 }
 

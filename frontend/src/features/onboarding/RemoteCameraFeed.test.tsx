@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const openOnboardingSocket = vi.hoisted(() => vi.fn())
 const liveness = vi.hoisted(() => ({ adopt: vi.fn(), livenessRef: null as string | null }))
 
-vi.mock('./onboardingSocket', () => ({
+vi.mock('./onboardingSocket', async (importOriginal) => ({
+  // The real refusal wording stays in place — only the socket is faked.
+  ...(await importOriginal<typeof OnboardingSocketModule>()),
   openOnboardingSocket,
 }))
 vi.mock('../liveness/LivenessContext', () => ({
@@ -13,18 +15,21 @@ vi.mock('../liveness/LivenessContext', () => ({
 
 import { RemoteCameraFeed } from './RemoteCameraFeed'
 import type { OnboardingEnvelope } from './onboardingSocket'
+import type * as OnboardingSocketModule from './onboardingSocket'
+
 import { artifactUrl } from '../../lib/api'
+import { makeLivenessLink } from '../../test/fixtures'
 
 /**
- * The teller-side liveness feed: opens the fixed session's WebSocket the
- * moment the method is chosen, asks the customer display to start filming
+ * The teller-side liveness feed: opens the officer's current link the moment
+ * the method is chosen, asks the customer display to start filming
  * (`activateLiveness`), and renders incoming frames. "Start liveness check"
  * queues the customer's 3-second recording; the returned `livenessRef` is
  * adopted into the shared artefact and played back from the artefact store.
- * When no fixed display is configured it says so instead of opening a socket.
+ * With no link open it says so instead of opening a socket.
  */
 
-const SETTINGS = { enabled: true, sessionId: 'sess_fixed_1' }
+const LINKS = { links: [makeLivenessLink({ token: 'sess_fixed_1' })] }
 
 function stubSettings(payload: unknown, status = 200) {
   const mock = vi.fn(() =>
@@ -40,12 +45,21 @@ function stubSettings(payload: unknown, status = 200) {
 }
 
 async function mountWithStory() {
-  stubSettings(SETTINGS)
+  stubSettings(LINKS)
   const send = vi.fn()
-  const story: { h: ((envelope: OnboardingEnvelope) => void) | null } = { h: null }
+  const story: {
+    h: ((envelope: OnboardingEnvelope) => void) | null
+    onClose: ((code: number) => void) | null
+  } = { h: null, onClose: null }
   openOnboardingSocket.mockImplementation(
-    (_id: string, _role: string, handler: typeof story.h) => {
+    (
+      _id: string,
+      _role: string,
+      handler: (envelope: OnboardingEnvelope) => void,
+      onClose?: (code: number) => void,
+    ) => {
       story.h = handler
+      story.onClose = onClose ?? null
       return { send, close: vi.fn() }
     },
   )
@@ -115,8 +129,8 @@ function stubCanvas() {
 }
 
 describe('RemoteCameraFeed', () => {
-  it('opens the fixed session and asks the display to film as soon as it mounts', async () => {
-    stubSettings(SETTINGS)
+  it('opens the current link and asks the display to film as soon as it mounts', async () => {
+    stubSettings(LINKS)
     const send = vi.fn()
     openOnboardingSocket.mockReturnValue({ send, close: vi.fn() })
 
@@ -126,6 +140,7 @@ describe('RemoteCameraFeed', () => {
     expect(openOnboardingSocket).toHaveBeenCalledWith(
       'sess_fixed_1',
       'teller',
+      expect.any(Function),
       expect.any(Function),
     )
     expect(send).toHaveBeenCalledWith({ type: 'activateLiveness' })
@@ -137,7 +152,7 @@ describe('RemoteCameraFeed', () => {
   it('draws incoming customer frames onto the preview canvas', async () => {
     const decoder = stubFrameDecoder()
     const canvas = stubCanvas()
-    stubSettings(SETTINGS)
+    stubSettings(LINKS)
     const send = vi.fn()
     const story: { h: ((envelope: OnboardingEnvelope) => void) | null } = { h: null }
     openOnboardingSocket.mockImplementation(
@@ -201,24 +216,42 @@ describe('RemoteCameraFeed', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('opens no socket when the fixed display is disabled', async () => {
-    stubSettings({ enabled: false, sessionId: 'sess_fixed_1' })
+  it('opens no socket when no link is open', async () => {
+    stubSettings({ links: [] })
 
     render(<RemoteCameraFeed />)
 
     expect(
-      await screen.findByText(/no fixed customer display is enabled yet/i),
+      await screen.findByText(/no liveness link is open yet/i),
     ).toBeInTheDocument()
     expect(openOnboardingSocket).not.toHaveBeenCalled()
   })
 
-  it('treats a refused settings load as "not configured"', async () => {
+  it('names the refusal when the room closes under it', async () => {
+    const { story } = await mountWithStory()
+
+    story.onClose?.(4410)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This link has expired. Create a new one to reach the customer screen.',
+    )
+  })
+
+  it('stays quiet for a close this tab performed itself', async () => {
+    const { story } = await mountWithStory()
+
+    story.onClose?.(1000)
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('treats a refused links load as "no link open"', async () => {
     stubSettings({ error: { code: 'UNAVAILABLE', message: 'Down.' } }, 503)
 
     render(<RemoteCameraFeed />)
 
     expect(
-      await screen.findByText(/no fixed customer display is enabled yet/i),
+      await screen.findByText(/no liveness link is open yet/i),
     ).toBeInTheDocument()
     expect(openOnboardingSocket).not.toHaveBeenCalled()
   })

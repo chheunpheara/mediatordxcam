@@ -3,6 +3,7 @@ import {
   type AuthUser,
   type FaceCaptureResponse,
   type IdentityFieldOutcome,
+  type LivenessLink,
   type ProcessIdCardResponse,
   type UploadedRecord,
   type VerificationMethod,
@@ -263,17 +264,34 @@ export function makeFaceCapture(): FaceCaptureResponse {
   }
 }
 
+/**
+ * One liveness link, as `GET /api/v1/onboarding/liveness-links` reports it.
+ *
+ * A usable link by default, so a test that opens the teller side only has to
+ * name the token it expects the relay to use.
+ */
+export function makeLivenessLink(overrides: Partial<LivenessLink> = {}): LivenessLink {
+  return {
+    id: 'lnk_0a1b2c3d',
+    customer: 'Sok Dara',
+    token: 'sess_fixed_1',
+    status: 'in_use',
+    createdAt: '2026-10-07T08:00:00Z',
+    expiresAt: '2026-10-07T16:00:00Z',
+    supersededAt: null,
+    owner: { id: 'user_test_admin', name: 'Test Admin' },
+    ...overrides,
+  }
+}
+
 /** Install a `fetch` stub that answers both KYC endpoints (§19). */
 export function stubKycFetch(
   result: ProcessIdCardResponse = makeProcessingResult(),
   methods: readonly VerificationMethod[] = VERIFICATION_METHODS,
   verifyResult: VerifyResponse | VerifyResponse[] = makeVerifyResult(),
-  // The customer display is off by default: only a test that exercises the
-  // teller screen asks for one, since enabling it opens a relay socket.
-  livenessPage: { readonly enabled: boolean; readonly sessionId: string } = {
-    enabled: false,
-    sessionId: '',
-  },
+  // No customer screen by default: only a test that exercises the teller side
+  // passes a link, since one opens a relay socket.
+  livenessLinks: readonly LivenessLink[] = [],
 ): ReturnType<typeof vi.fn> {
   // An array answers successive /verify calls (last one repeats), so a test can
   // drive run after run through the accumulated list (D16).
@@ -292,8 +310,8 @@ export function stubKycFetch(
         ? makeFaceCapture()
         : url.includes('/api/v1/kyc/verify')
           ? verifyAnswers[Math.min(verifyCall++, verifyAnswers.length - 1)]!
-          : url.includes('/api/v1/onboarding/liveness-page')
-                ? livenessPage
+          : url.includes('/api/v1/onboarding/liveness-links')
+                ? { links: livenessLinks }
                 : url.includes('/api/v1/records/mappings')
             ? { mapping: null }
             : url.includes('/verification')
