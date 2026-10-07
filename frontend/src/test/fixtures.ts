@@ -4,6 +4,7 @@ import {
   type FaceCaptureResponse,
   type IdentityFieldOutcome,
   type LivenessLink,
+  type LivenessPageSettings,
   type ProcessIdCardResponse,
   type UploadedRecord,
   type VerificationMethod,
@@ -292,6 +293,8 @@ export function stubKycFetch(
   // No customer screen by default: only a test that exercises the teller side
   // passes a link, since one opens a relay socket.
   livenessLinks: readonly LivenessLink[] = [],
+  // The counter's standby room, off until a test asks for it.
+  livenessPage: LivenessPageSettings = { enabled: false, sessionId: 'sess_standby_1' },
 ): ReturnType<typeof vi.fn> {
   // An array answers successive /verify calls (last one repeats), so a test can
   // drive run after run through the accumulated list (D16).
@@ -310,17 +313,19 @@ export function stubKycFetch(
         ? makeFaceCapture()
         : url.includes('/api/v1/kyc/verify')
           ? verifyAnswers[Math.min(verifyCall++, verifyAnswers.length - 1)]!
-          : url.includes('/api/v1/onboarding/liveness-links')
-                ? { links: livenessLinks }
-                : url.includes('/api/v1/records/mappings')
-            ? { mapping: null }
-            : url.includes('/verification')
-              ? makeUploadedRecord({ status: 'verified', verifiedAt: 1759710000 })
-              : url.includes('/api/v1/records')
-                ? method === 'POST'
-                  ? { records: [] }
-                  : { records: [], total: 0 }
-                : result
+          : url.includes('/api/v1/onboarding/liveness-page')
+            ? livenessPage
+            : url.includes('/api/v1/onboarding/liveness-links')
+              ? { links: livenessLinks }
+              : url.includes('/api/v1/records/mappings')
+                ? { mapping: null }
+                : url.includes('/verification')
+                  ? makeUploadedRecord({ status: 'verified', verifiedAt: 1759710000 })
+                  : url.includes('/api/v1/records')
+                    ? method === 'POST'
+                      ? { records: [] }
+                      : { records: [], total: 0 }
+                    : result
     return Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,

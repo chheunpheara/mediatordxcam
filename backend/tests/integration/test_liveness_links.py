@@ -217,7 +217,7 @@ class TestWhoMaySee:
         assert by_id[officer_link["id"]]["status"] == "in_use"
         assert by_id[admin_link["id"]]["token"] == admin_link["token"]
 
-    def test_no_endpoint_can_rewrite_a_link_or_serve_the_old_fixed_page(
+    def test_no_endpoint_can_rewrite_a_link_or_extend_the_stay_of_a_url(
         self, signed_in: TestClient
     ) -> None:
         token, _ = _sign_in(signed_in, ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD)
@@ -225,8 +225,10 @@ class TestWhoMaySee:
 
         spec = signed_in.get("/openapi.json").json()
 
-        assert "/api/v1/onboarding/liveness-page" not in spec["paths"]
+        # Links are only ever listed and minted; the standby screen is only
+        # ever read and switched — neither offers an update or a delete.
         assert set(spec["paths"][LINKS]) == {"get", "post"}
+        assert set(spec["paths"]["/api/v1/onboarding/liveness-page"]) == {"get", "put"}
 
     def test_a_minted_url_is_still_listed_by_a_fresh_application(
         self, auth_settings: Settings, monkeypatch: pytest.MonkeyPatch

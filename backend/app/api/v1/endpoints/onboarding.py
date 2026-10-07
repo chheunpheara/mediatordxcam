@@ -1,4 +1,10 @@
-"""Dual-screen onboarding: liveness links, session mint, WebSocket relay (Phase 7).
+"""Dual-screen onboarding: standby screen, liveness links, session mint, WS relay (Phase 7).
+
+Two permanent-ish rooms exist side by side. The **standby screen** is one
+global token that never expires: paste its `/display?session=` URL onto the
+counter monitor once and it works for any customer who sits down, while the
+officer's panel joins it whenever the dialog says "standby". Any officer may
+turn it on or off; it never expires and turning it off does not touch a link.
 
 An officer mints one **liveness link** per customer: an unguessable token with
 an expiry, handed to the customer monitor as `/display?session=<token>`. Both
@@ -26,6 +32,7 @@ from app.api.deps import (
     AuthServiceDep,
     CurrentUserDep,
     LivenessLinkDep,
+    LivenessSettingsDep,
     current_user,
     user_from_websocket,
 )
@@ -33,6 +40,7 @@ from app.core.config import Settings
 from app.core.errors import AppError, ErrorCode
 from app.domain.auth import User
 from app.infrastructure.liveness_link_store import LivenessLink, LivenessLinkStore
+from app.infrastructure.liveness_settings_store import LivenessSettingsStore
 from app.schemas.onboarding import (
     CreateLivenessLinkRequest,
     CreateLivenessLinkResponse,
@@ -40,6 +48,8 @@ from app.schemas.onboarding import (
     LivenessLinkOwner,
     LivenessLinkResponse,
     OnboardingSessionCreated,
+    ShowFixedPage,
+    UpdateFixedPage,
 )
 from app.services.onboarding import OnboardingHub, Role
 
@@ -58,6 +68,36 @@ WS_TELLER_NOT_OWNER = 4403
 WS_UNKNOWN_SESSION = 4404
 WS_EXPIRED_LINK = 4410
 WS_SUPERSEDED_LINK = 4411
+#: The standby token is known, but the officer has the counter screen off.
+#: Distinct from 4404: this tab may come back the moment somebody switches on.
+WS_DISPLAY_OFF = 4412
+
+
+@router.get(
+    "/api/v1/onboarding/liveness-page",
+    response_model=ShowFixedPage,
+    summary="Standby-screen room: its permanent token and whether it is in service",
+    dependencies=[Depends(current_user)],
+)
+async def get_liveness_page(store: LivenessSettingsDep) -> ShowFixedPage:
+    """One row, created on first read; the token is minted exactly once."""
+    page = await asyncio.to_thread(store.get)
+    return ShowFixedPage(enabled=page.enabled, sessionId=page.token)
+
+
+@router.put(
+    "/api/v1/onboarding/liveness-page",
+    response_model=ShowFixedPage,
+    summary="Switch the counter's standby screen on or off",
+    dependencies=[Depends(current_user)],
+)
+async def put_liveness_page(
+    body: UpdateFixedPage,
+    store: LivenessSettingsDep,
+) -> ShowFixedPage:
+    """Any officer may do this — it is the counter's screen, not a secret."""
+    page = await asyncio.to_thread(store.set_enabled, body.enabled)
+    return ShowFixedPage(enabled=page.enabled, sessionId=page.token)
 
 
 @router.post(
@@ -201,7 +241,17 @@ async def onboarding_ws(websocket: WebSocket, session_id: str, role: Role | None
     # as an opaque 1006. A socket that may join is accepted by `join` itself.
     refusal: int | None
     if link is None:
-        refusal = None if session_id in _SESSIONS else WS_UNKNOWN_SESSION
+        if session_id in _SESSIONS:
+            refusal = None
+        else:
+            # The standby room: known, global, and open to every teller — the
+            # only condition is that somebody has the counter screen in service.
+            # `get` mints the row once and then always names the same token.
+            standby = await asyncio.to_thread(_ws_settings_store(websocket).get)
+            if session_id != standby.token:
+                refusal = WS_UNKNOWN_SESSION
+            else:
+                refusal = None if standby.enabled else WS_DISPLAY_OFF
     else:
         refusal = await _refusal_for(websocket, settings, link, declared)
     if refusal is not None:
@@ -250,11 +300,22 @@ async def _refusal_for(
 def _ws_link_store(websocket: WebSocket) -> LivenessLinkStore:
     """The link store behind a WebSocket: a socket has an app, not a request.
 
-    Cached on `app.state` exactly like the HTTP provider, so the schema (and
-    the retirement of the fixed page's table) happens once per application.
+    Cached on `app.state` exactly like the HTTP provider, so the schema
+    happens once per application.
     """
     cached: LivenessLinkStore | None = getattr(websocket.app.state, "liveness_link_store", None)
     if cached is None:
         cached = LivenessLinkStore(websocket.app.state.settings.database_url or "")
         websocket.app.state.liveness_link_store = cached
+    return cached
+
+
+def _ws_settings_store(websocket: WebSocket) -> LivenessSettingsStore:
+    """The standby-screen store behind a WebSocket, cached like its HTTP twin."""
+    cached: LivenessSettingsStore | None = getattr(
+        websocket.app.state, "liveness_settings_store", None
+    )
+    if cached is None:
+        cached = LivenessSettingsStore(websocket.app.state.settings.database_url or "")
+        websocket.app.state.liveness_settings_store = cached
     return cached

@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import {
+  SCREEN_MODE_CHANGED,
+  displayRoomMessage,
+  fetchDisplayRoom,
+  readScreenMode,
+} from './displayRoom'
+import type { DisplayRoom } from './displayRoom'
 import { onboardingRefusalMessage, openOnboardingSocket } from './onboardingSocket'
 import type { OnboardingEnvelope } from './onboardingSocket'
 import { useLiveFrame } from './useLiveFrame'
 import { useFaceCapture } from '../face-capture/FaceCaptureContext'
-import { fetchActiveLivenessLink } from '../../lib/api'
 
 /**
  * The customer display's camera, taken from here for the current-face photo.
@@ -12,7 +18,9 @@ import { fetchActiveLivenessLink } from '../../lib/api'
  * `FaceCapturePanel` keeps the teller's own camera and the upload as they
  * were; this is the same photo driven the way the liveness clip is — the
  * method's requirements turn the monitor on, the customer taps nothing, and
- * the shutter is a button on this side:
+ * the shutter is a button on this side. The room it joins is whichever the
+ * dialog selected for this browser — the standby screen or this customer's
+ * link — so switching screens moves an open panel to the other room:
  *
  *  - mounting sends `activateFaceCapture`, so choosing a method that needs
  *    the customer's face opens the camera over there;
@@ -30,7 +38,7 @@ import { fetchActiveLivenessLink } from '../../lib/api'
  */
 export function RemoteFaceCapture() {
   const { capture, faceRef } = useFaceCapture()
-  const [hasLink, setHasLink] = useState<boolean | null>(null)
+  const [room, setRoom] = useState<DisplayRoom | null>(null)
   const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
   const [taking, setTaking] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -65,29 +73,47 @@ export function RemoteFaceCapture() {
   useEffect(() => {
     let done = false
 
-    fetchActiveLivenessLink()
-      .then((link) => {
-        if (done) return
-        setHasLink(link !== null && link.token !== null)
-        if (link === null || link.token === null) return
-        const socket = openOnboardingSocket(
-          link.token,
-          'teller',
-          handleTellerEvent,
-          (code) => {
+    // Picking a room again (the dialog's screen switch) closes whatever
+    // socket was opened here and joins the other one; only the latest pick
+    // may report back, so two switches in flight cannot settle on the room
+    // nobody asked for last.
+    let generation = 0
+    const joinRoom = () => {
+      generation += 1
+      const picked = generation
+      const mode = readScreenMode()
+      socketRef.current?.close()
+      socketRef.current = null
+      setRoom(null)
+      fetchDisplayRoom()
+        .then((found) => {
+          if (done || picked !== generation) return
+          setRoom(found)
+          if (found.token === null) return
+          const socket = openOnboardingSocket(found.token, 'teller', handleTellerEvent, (code) => {
             const message = onboardingRefusalMessage(code, 'teller')
             if (message === null) return
             setTaking(false)
             setNote(message)
             setNoteIsError(true)
-          },
-        )
-        socketRef.current = socket
-        askForCamera()
-      })
-      .catch(() => setHasLink(false))
+          })
+          socketRef.current = socket
+          askForCamera()
+        })
+        .catch(() => {
+          if (done || picked !== generation) return
+          // A refused load degrades to whichever sentence fits the room that
+          // was asked for: unique mode has always said "no link open", while
+          // standby mode has no link to speak of and must not claim one.
+          setRoom({ mode, token: null, reason: mode === 'static' ? 'unreachable' : 'no-link' })
+        })
+    }
+
+    joinRoom()
+    window.addEventListener(SCREEN_MODE_CHANGED, joinRoom)
     return () => {
       done = true
+      window.removeEventListener(SCREEN_MODE_CHANGED, joinRoom)
       socketRef.current?.close()
       socketRef.current = null
     }
@@ -150,7 +176,7 @@ export function RemoteFaceCapture() {
     socketRef.current?.send({ type: 'capturePhoto' })
   }
 
-  if (hasLink === null) {
+  if (room === null) {
     return (
       <p className="text-ink-subtle text-xs" role="status">
         Contacting the customer display…
@@ -158,12 +184,8 @@ export function RemoteFaceCapture() {
     )
   }
 
-  if (!hasLink) {
-    return (
-      <p className="text-ink-subtle text-xs">
-        No liveness link is open yet. Create one to reach the customer screen.
-      </p>
-    )
+  if (room.token === null) {
+    return <p className="text-ink-subtle text-xs">{displayRoomMessage(room.reason)}</p>
   }
 
   return (

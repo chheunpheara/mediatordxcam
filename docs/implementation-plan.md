@@ -5,8 +5,8 @@ shipped and green, Phase 9 is partially shipped, Phases 8 and 10 are open.
 Every claim names the module that implements it; an unfinished phase keeps the
 exit criteria it still owes. Decisions are in §7, risks in §6.
 
-Current gate: `make check` passes — **537** backend tests (pytest, `ruff`,
-`mypy --strict`) and **329** frontend tests across 37 files (eslint, tsc,
+Current gate: `make check` passes — **565** backend tests (pytest, `ruff`,
+`mypy --strict`) and **372** frontend tests across 39 files (eslint, tsc,
 vitest).
 
 ---
@@ -122,7 +122,7 @@ framework), `services` orchestrates, `api` translates, `infrastructure` and
 | `app/infrastructure/` | Persistence | `db` (registry), `auth_store`, `audit_store`, `record_store`, `integration_store`, `liveness_link_store` |
 | `app/integrations/camdx/` | Provider port | `mock/`, `verify.py`, `ocr.py`, `services/` |
 | `app/schemas/` | Pydantic contracts | request/response models shared by every endpoint |
-| `backend/tests/{unit,integration}` | 558 tests | domain unit, FastAPI-over-ASGI integration, scenario tests |
+| `backend/tests/{unit,integration}` | 565 tests | domain unit, FastAPI-over-ASGI integration, scenario tests |
 
 ### 2.3 Frontend module map
 
@@ -177,7 +177,7 @@ on the oval after the camera closes.
 | Store | Holds | Lifetime |
 |---|---|---|
 | Session cookie (opaque, 256-bit, 12 h) | sign-in | `infrastructure/auth_store` |
-| PostgreSQL / SQLite tables | identity registry (D13), users/roles/permissions, audit log (append-only triggers), records, integration settings, liveness links (one usable per officer) | process lifetime; `CREATE TABLE IF NOT EXISTS` at startup, no Alembic by design |
+| PostgreSQL / SQLite tables | identity registry (D13), users/roles/permissions, audit log (append-only triggers), records, integration settings, liveness links (one usable per officer), standby display settings (one permanent room) | process lifetime; `CREATE TABLE IF NOT EXISTS` at startup, no Alembic by design |
 | Temporary artefact store | id-card images, face crops, liveness clips, face photos | TTL + sweeper, handle-addressed, audited |
 | Browser `sessionStorage` slices | processing result, face/liveness handles, `docStored` marker | per tab; handles are scoped to the document they came from |
 | Browser IndexedDB | the uploaded document bytes | cleared on back-to-upload (D21) |
@@ -354,11 +354,11 @@ make check      # = backend-lint backend-format backend-typecheck backend-test
 | Gate | Tool | Current |
 |---|---|---|
 | Backend lint/format | `ruff check`, `ruff format --check` | clean |
-| Backend types | `mypy --strict` (pydantic plugin) | 74 files, no issues |
-| Backend tests | `pytest` (unit + integration, mock mode forced) | 558 passed |
+| Backend types | `mypy --strict` (pydantic plugin) | 75 files, no issues |
+| Backend tests | `pytest` (unit + integration, mock mode forced) | 565 passed |
 | Frontend lint | `eslint` (flat config, react-hooks, typescript-eslint) | clean |
 | Frontend types | `tsc --noEmit` | clean |
-| Frontend tests | `vitest` + Testing Library (jsdom) | 358 passed / 38 files |
+| Frontend tests | `vitest` + Testing Library (jsdom) | 372 passed / 39 files |
 
 Test layout and rules: `docs/testing.md`. CI and local runs use the same
 targets; no test may skip.
@@ -408,3 +408,5 @@ targets; no test may skip.
 | D25 | Every action that touches an identity leaves an append-only audit entry: `audit_logs` records an epoch timestamp, the staff id/email/role, one of four action types (`CAMDX_FETCH`, `IDENTITY_VERIFIED`, `MANUAL_APPROVED`, `POST_TO_CORE`), the target system URL, a payload snapshot masked before the store ever sees it, the biometric confidence score when a run produced one, and a `PENDING`/`SUCCESS`/`FAILED` status with the error body a failure captured — the table is enforced append-only by triggers installed idempotently at startup (SQLite `RAISE(ABORT)` and a PostgreSQL plpgsql twin: DELETE always refused, UPDATE only the single status transition on the outcome columns); "Post to Core" writes two-phase — a `PENDING` row commits before the outbound call, so no audit means no post, and is finalized best-effort after it, while a verification records `IDENTITY_VERIFIED` once, born terminal; national IDs keep only their first three and last two digits (their `submitted` sibling with them) and secret keys are replaced wholesale, all at the write boundary; `GET /api/v1/admin/audit-logs` — admin-only, staff/action/status/date-range filters, limit and offset paging — feeds a read-only "Audit trail" tab on the Administration page whose rows expand to the stored evidence | Maker-Checker needs evidence nobody, administrator included, can rewrite after the fact, so immutability belongs to the database rather than to an API that simply omits DELETE; the outcome lives in `status` so the action vocabulary stays four stable words while a failed post remains unmistakable, and a row left `PENDING` after a crash is itself the signal of an interrupted call — writing the entry only after the HTTP response would lose exactly the failures worth auditing, which is why the begin is fail-closed and the finalize is best-effort; masking at the write boundary lets the trail be shown in full without §29 exposure and without a read path that must remember to redact, while §28 keeps the post endpoint's own failure reasons to its four safe words with the real evidence held behind the admin gate; epoch timestamps follow the repo's portability rule, biometric scores stay NULL when no liveness ran rather than being invented, and the tab renders without waiting on the roles and permissions lists because the trail belongs to no tab but its own
 
 | D26 | The customer monitor is reached through **per-customer liveness links** instead of one fixed page: the workspace header's "Liveness Links" button (every signed-in officer, not only administrators) opens a dialog that mints a link for a named customer — token generated once behind `?session=`, an expiry chosen from 1 h / 4 h / 8 h / 24 h / 7 d presets or a custom date-time, never edited or rotated afterwards — while `GET`/`POST /api/v1/onboarding/liveness-links` list the officer's rows newest first (expired ones kept, grouped by customer) and mint one, a new mint setting `supersededAt` on the previous so exactly one link per officer is usable; the server derives `in_use`/`superseded`/`expired` per request from the two timestamps, rejects a past `expiresAt` with `400 INVALID_REQUEST` and `error.fieldErrors`, and never hands out another officer's token (`token: null`, `scope=all` administrator-only metadata); the relay accepts the WebSocket handshake and *then* closes `4404` unknown room, `4410` expired, `4411` superseded, `4403` not the owner, which the customer screen and the teller panels each turn into one plain sentence | The fixed page was all-or-nothing for everybody and its permanent URL never expired, so a link handed to one customer went on working after the application it belonged to had ended; a per-customer token gives each application an address that dies on schedule, and the supersedes rule makes a stale URL stop rather than quietly outlive the new one — which is also why there is no update route: a token that cannot be rewritten is one that cannot drift from the row it was issued for; deriving status instead of storing it keeps a restart from lying about expiry, keeping expired rows answers a returning customer by name instead of by memory of which URL worked, redacting other officers' tokens keeps the read path free of §29 exposure, and a close code after `accept` is the only signal a socket can carry — a refusal *before* `accept` would leave the peer unable to tell "expired" from "not there" |
+
+| D27 | The customer monitor is reachable two ways and the dialog says which: the **standby screen** returns as one global room (`liveness_display_settings`, `GET`/`PUT /api/v1/onboarding/liveness-page`) whose token is minted once and never rewritten, so the URL pasted on the counter monitor survives redeploys, reloads and every toggle, with a switch any signed-in officer may flip and a room that has no owner, no expiry and no supersession — while **unique links** keep every rule D26 gave them; the Liveness Links dialog gains a "Screen to drive" choice (Standby screen / Unique link) stored per browser in `localStorage`, and the teller panels (`RemoteCameraFeed`, `RemoteFaceCapture`, `TellerDashboard`) join whichever room it names, re-joining when the choice changes, with the standby socket refused as `4412` while the screen is off | The counter case and the remote case are different jobs: a customer sitting down should not wait for a URL to be minted and read out, while a customer who is not in the room cannot open a URL that only exists on this screen — one permanent standby URL plus per-customer links covers both without either having to pretend to be the other. The choice lives in the browser because it describes that counter's screen rather than the officer's account, and it defaults to `unique` so an installation that has never seen the dialog keeps behaving exactly as D26 shipped it. `4412` rather than `4404` because "you had this and it is off now" is a different instruction from "that never existed", and the standby row sits beside the links table instead of inside it — a room must not inherit an expiry, a supersedes rule or an owner it was deliberately built without |

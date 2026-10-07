@@ -1,19 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
 
+import {
+  SCREEN_MODE_CHANGED,
+  displayRoomMessage,
+  fetchDisplayRoom,
+  readScreenMode,
+} from './displayRoom'
+import type { DisplayRoom } from './displayRoom'
 import { onboardingRefusalMessage, openOnboardingSocket } from './onboardingSocket'
 import type { OnboardingEnvelope } from './onboardingSocket'
 import { useLiveFrame } from './useLiveFrame'
 import { useLiveness } from '../liveness/LivenessContext'
-import { artifactUrl, fetchActiveLivenessLink } from '../../lib/api'
+import { artifactUrl } from '../../lib/api'
 
 /**
  * In-browser live feed of the separate customer display tab (Phase 7).
  *
- * The workspace joins the officer's current liveness link as a *sender* of
- * the activation command; frames flow countermand it back as teller-side
- * events. The link is fetched, not configured here: one minted link is all
- * this panel needs, and it is the same one the customer monitor opens.
- * There is no local camera UI: the customer is the person proving liveness.
+ * The workspace joins whichever room the dialog selected for this browser —
+ * the counter's standby screen or the link minted for this customer — as a
+ * *sender* of the activation command; frames flow countermand it back as
+ * teller-side events. The room is fetched, not configured here: one room is
+ * all this panel needs, and it is the same one the customer monitor opens.
+ * Switching screens while this panel is open closes the socket and joins the
+ * other room. There is no local camera UI: the customer is the person proving
+ * liveness.
  *
  * "Start liveness check" queues the 3-second recording on the customer
  * screen. The customer tab uploads the clip itself and the relay hands back
@@ -40,7 +50,7 @@ export function RemoteCameraFeed({
   readonly hideClip?: boolean
 } = {}) {
   const { adopt, livenessRef } = useLiveness()
-  const [hasLink, setHasLink] = useState<boolean | null>(null)
+  const [room, setRoom] = useState<DisplayRoom | null>(null)
   const { canvasRef, hasFrame, acceptFrame } = useLiveFrame()
   const [recording, setRecording] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -74,33 +84,57 @@ export function RemoteCameraFeed({
       socketRef.current?.send({ type: 'activateLiveness' })
     }
 
-    fetchActiveLivenessLink()
-      .then((link) => {
-        if (done) return
-        setHasLink(link !== null && link.token !== null)
-        if (link === null || link.token === null) return
-        const socket = openOnboardingSocket(
-          link.token,
-          'teller',
-          (envelope) => {
-            handleTellerEvent(envelope)
-          },
-          (code) => {
-            // The room ended under us — expired, replaced, or another
-            // officer's link. Say which, and leave the feed as it is.
-            const message = onboardingRefusalMessage(code, 'teller')
-            if (message === null) return
-            setRecording(false)
-            setNote(message)
-            setNoteIsError(true)
-          },
-        )
-        socketRef.current = socket
-        askForCamera()
-      })
-      .catch(() => setHasLink(false))
+    // The room to join — this customer's link or the counter's standby
+    // screen — is the dialog's call, made for this browser. Picking it again
+    // closes whatever socket was opened here and joins the other room; the
+    // generation only lets the latest pick report back, so two switches in
+    // flight cannot settle on the room nobody asked for last.
+    let generation = 0
+    const joinRoom = () => {
+      generation += 1
+      const picked = generation
+      const mode = readScreenMode()
+      socketRef.current?.close()
+      socketRef.current = null
+      setRoom(null)
+      fetchDisplayRoom()
+        .then((found) => {
+          if (done || picked !== generation) return
+          setRoom(found)
+          if (found.token === null) return
+          const socket = openOnboardingSocket(
+            found.token,
+            'teller',
+            (envelope) => {
+              handleTellerEvent(envelope)
+            },
+            (code) => {
+              // The room ended under us — expired, replaced, switched off,
+              // or another officer's link. Say which, keep the feed as it is.
+              const message = onboardingRefusalMessage(code, 'teller')
+              if (message === null) return
+              setRecording(false)
+              setNote(message)
+              setNoteIsError(true)
+            },
+          )
+          socketRef.current = socket
+          askForCamera()
+        })
+        .catch(() => {
+          if (done || picked !== generation) return
+          // A refused load degrades to whichever sentence fits the room that
+          // was asked for: unique mode has always said "no link open", while
+          // standby mode has no link to speak of and must not claim one.
+          setRoom({ mode, token: null, reason: mode === 'static' ? 'unreachable' : 'no-link' })
+        })
+    }
+
+    joinRoom()
+    window.addEventListener(SCREEN_MODE_CHANGED, joinRoom)
     return () => {
       done = true
+      window.removeEventListener(SCREEN_MODE_CHANGED, joinRoom)
       socketRef.current?.close()
       socketRef.current = null
     }
@@ -142,7 +176,7 @@ export function RemoteCameraFeed({
     }
   }, [acceptFrame])
 
-  if (hasLink === null) {
+  if (room === null) {
     return (
       <p className="text-ink-subtle text-xs" role="status">
         Contacting the customer display…
@@ -150,12 +184,8 @@ export function RemoteCameraFeed({
     )
   }
 
-  if (!hasLink) {
-    return (
-      <p className="text-ink-subtle text-xs">
-        No liveness link is open yet. Create one to reach the customer screen.
-      </p>
-    )
+  if (room.token === null) {
+    return <p className="text-ink-subtle text-xs">{displayRoomMessage(room.reason)}</p>
   }
 
   return (

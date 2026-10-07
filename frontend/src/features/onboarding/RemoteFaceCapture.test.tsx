@@ -24,6 +24,7 @@ vi.mock('../face-capture/FaceCaptureContext', () => ({
 }))
 
 import { RemoteFaceCapture } from './RemoteFaceCapture'
+import { writeScreenMode } from './displayRoom'
 import type { OnboardingEnvelope } from './onboardingSocket'
 import type * as OnboardingSocketModule from './onboardingSocket'
 
@@ -234,5 +235,21 @@ describe('RemoteFaceCapture', () => {
       await screen.findByText(/No liveness link is open yet/i),
     ).toBeInTheDocument()
     expect(openOnboardingSocket).not.toHaveBeenCalled()
+  })
+
+  it('joins the counter standby room when that screen is chosen', async () => {
+    writeScreenMode('static')
+    stubSettings({ enabled: true, sessionId: 'sess_standby_1' })
+    openOnboardingSocket.mockReturnValue({ send: vi.fn(), close: vi.fn() })
+
+    render(<RemoteFaceCapture />)
+
+    await waitFor(() => expect(openOnboardingSocket).toHaveBeenCalledTimes(1))
+    expect(openOnboardingSocket).toHaveBeenCalledWith(
+      'sess_standby_1',
+      'teller',
+      expect.any(Function),
+      expect.any(Function),
+    )
   })
 })

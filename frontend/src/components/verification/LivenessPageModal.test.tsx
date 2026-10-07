@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { LivenessPageModal } from './LivenessPageModal'
 import { writeAuthUser } from '../../lib/auth'
+import { readScreenMode } from '../../features/onboarding/displayRoom'
 import { TEST_AUTH_USER, bodyOf, makeLivenessLink } from '../../test/fixtures'
 
 /**
@@ -17,6 +18,8 @@ import { TEST_AUTH_USER, bodyOf, makeLivenessLink } from '../../test/fixtures'
  */
 
 const OWN_LIST: Route = { payload: { links: [makeLivenessLink()] } }
+const STANDBY_SESSION = 'sess_standby_1'
+const STANDBY_OFF: Route = { payload: { enabled: false, sessionId: STANDBY_SESSION } }
 const EXPIRED_LINK = makeLivenessLink({
   id: 'lnk_expired',
   token: 'sess_old_1',
@@ -35,23 +38,38 @@ function stubRoutes(
     readonly list?: Route
     readonly listAll?: Route
     readonly create?: Route
+    readonly page?: Route
   } = {},
 ) {
   const list = routes.list ?? OWN_LIST
-  const mock = vi.fn((input: string, init?: RequestInit) => {
-    const route =
-      init?.method === 'POST'
-        ? routes.create
-        : String(input).includes('scope=all')
-          ? (routes.listAll ?? list)
-          : list
-    if (!route) throw new Error('unexpected POST')
-    return Promise.resolve(
+  const page = routes.page ?? STANDBY_OFF
+  const respond = (route: Route) =>
+    Promise.resolve(
       new Response(JSON.stringify(route.payload), {
         status: route.status ?? 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     )
+  const mock = vi.fn((input: string, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('liveness-page')) {
+      // A PUT answers with what was asked for, so the checkbox the dialog
+      // renders afterwards is the switch it just sent.
+      if (init?.method === 'PUT') {
+        const raw = typeof init.body === 'string' ? init.body : '{}'
+        const asked = JSON.parse(raw) as { enabled: boolean }
+        return respond({ payload: { enabled: asked.enabled, sessionId: STANDBY_SESSION } })
+      }
+      return respond(page)
+    }
+    const route =
+      init?.method === 'POST'
+        ? routes.create
+        : url.includes('scope=all')
+          ? (routes.listAll ?? list)
+          : list
+    if (!route) throw new Error('unexpected POST')
+    return respond(route)
   })
   vi.stubGlobal('fetch', mock)
   return mock
@@ -262,5 +280,50 @@ describe('LivenessPageModal', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the standby URL and switches the counter screen on from here', async () => {
+    const fetchMock = stubRoutes()
+    render(<LivenessPageModal onClose={vi.fn()} />)
+
+    const standby = await screen.findByLabelText<HTMLInputElement>('Standby URL')
+    expect(standby.readOnly).toBe(true)
+    expect(standby.value).toContain(`/display?session=${STANDBY_SESSION}`)
+
+    const toggle = screen.getByRole<HTMLInputElement>('checkbox', {
+      name: /standby screen is in service/i,
+    })
+    expect(toggle.checked).toBe(false)
+    expect(screen.getByText(/stay out of this room until/i)).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    await waitFor(() => expect(toggle.checked).toBe(true))
+    expect(screen.getByText(/panels can join this room now/i)).toBeInTheDocument()
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(put).toBeDefined()
+    if (!put) throw new Error('the standby switch was never sent')
+    expect(bodyOf<{ enabled: boolean }>(put)).toEqual({ enabled: true })
+    // Switching the screen on never touches a link.
+    expect(put[0].toString()).toContain('liveness-page')
+  })
+
+  it('drives the teller panels from the screen choice', async () => {
+    stubRoutes()
+    render(<LivenessPageModal onClose={vi.fn()} />)
+    await screen.findByLabelText('Display URL')
+
+    const standby = screen.getByRole('button', { name: 'Standby screen' })
+    const unique = screen.getByRole('button', { name: 'Unique link' })
+    expect(unique).toHaveAttribute('aria-pressed', 'true')
+    expect(readScreenMode()).toBe('unique')
+
+    fireEvent.click(standby)
+    expect(standby).toHaveAttribute('aria-pressed', 'true')
+    expect(readScreenMode()).toBe('static')
+
+    fireEvent.click(unique)
+    expect(unique).toHaveAttribute('aria-pressed', 'true')
+    expect(readScreenMode()).toBe('unique')
   })
 })

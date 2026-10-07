@@ -826,17 +826,29 @@ shutdown so a volume outliving the container holds nothing.
 
 ## Dual-screen onboarding · R6, R7
 
-The customer monitor is not a fixed page. Each officer mints a **link** per
-customer — a URL for the second monitor plus a secret token generated once
-behind `?session=`, never rewritten — and the teller tab joins the same link to
-drive that screen over `WS /ws/onboarding/{token}`.
+There are two rooms on the second monitor, and the officer's dialog chooses
+which one the teller tab drives.
+
+The **standby screen** is one global room for the counter: a token minted once
+and never rewritten, so its `/display?session=` URL can be pasted on the
+monitor a single time and keep working through redeploys, reloads and every
+toggle. Any officer may switch it on or off; it never expires, supersedes
+nothing, and the teller side has no owner — whoever is at that counter may
+join it.
+
+A **link** is minted per customer — a URL plus a secret token generated once
+behind `?session=`, never rewritten — for a customer who is not in the room.
+The teller tab joins whichever room the dialog selected, over
+`WS /ws/onboarding/{token}`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| `GET` | `/api/v1/onboarding/liveness-page` | The standby room: its permanent token and switch |
+| `PUT` | `/api/v1/onboarding/liveness-page` | Switch the counter's standby screen on or off (any officer) |
 | `GET` | `/api/v1/onboarding/liveness-links?scope=own` | Your links, newest first, expired ones included |
 | `GET` | `/api/v1/onboarding/liveness-links?scope=all` | Administrator read-only: every officer's links |
 | `POST` | `/api/v1/onboarding/liveness-links` | Mint one link for a named customer |
-| `POST` | `/api/v1/onboarding/sessions` | Ad-hoc room for a dashboard with no link open |
+| `POST` | `/api/v1/onboarding/sessions` | Ad-hoc room for a dashboard with no room open |
 | `WS` | `/ws/onboarding/{token}?role=teller\|customer` | The relay room itself |
 
 Two rules the server keeps on its own: **one usable link per officer** — a new
@@ -844,6 +856,19 @@ mint sets `supersededAt` on the previous one — and **status is derived per
 request** from `expiresAt` and `supersededAt`, so no row can claim to be live
 after a restart. There is no update or delete route: a token is issued once and
 served unchanged for its whole life.
+
+**`GET /api/v1/onboarding/liveness-page`** — `200`
+
+```json
+{ "enabled": true, "sessionId": "sess_4d8a…" }
+```
+
+The row is created on first read, so `sessionId` is minted exactly once;
+`enabled` starts `false`. **`PUT`** takes `{ "enabled": bool }` and answers with
+the same shape. Toggling is open to any signed-in officer (the counter's
+screen, not a secret), never touches `liveness-links`, and never moves
+`sessionId` — a URL already on the monitor keeps naming the same room. Both
+routes are `401` without credentials.
 
 **`GET /api/v1/onboarding/liveness-links`** — `200`
 
@@ -906,8 +931,11 @@ unable to tell an expired link from a link that never existed.
 | `4404` | No such room: unknown token, or a server restart |
 | `4410` | The link has expired |
 | `4411` | The link was superseded by a newer one |
+| `4412` | The standby screen is known, but switched off |
 
 The customer screen shuts its camera down and shows the sentence; the teller
 panel keeps its state and names what happened. The customer role is anonymous
-(the token *is* the credential); a teller must be the link's own owner, and
-frames relay only within that one room.
+(the token *is* the credential); a teller must be the link's own owner, while
+the standby room has no owner at all — anyone who knows its token and has the
+screen switched on may take either side. Frames relay only within that one
+room.

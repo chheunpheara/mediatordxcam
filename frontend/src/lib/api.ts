@@ -733,6 +733,26 @@ export async function createLivenessLink(input: {
   )
 }
 
+/** The standby screen: one permanent room for the counter monitor (Phase 7). */
+export interface LivenessPageSettings {
+  readonly enabled: boolean
+  /** Minted once, so the URL pasted on the counter monitor never moves. */
+  readonly sessionId: string
+}
+
+/** `GET /api/v1/onboarding/liveness-page` — the standby room and its switch. */
+export async function fetchLivenessPageSettings(): Promise<LivenessPageSettings> {
+  return requestJson<LivenessPageSettings>('/api/v1/onboarding/liveness-page')
+}
+
+/** `PUT /api/v1/onboarding/liveness-page` — any officer may switch the screen. */
+export async function saveLivenessPageSettings(enabled: boolean): Promise<LivenessPageSettings> {
+  return requestJson<LivenessPageSettings>(
+    '/api/v1/onboarding/liveness-page',
+    jsonInit('PUT', { enabled }),
+  )
+}
+
 /** `POST /api/v1/integrations/post` — replay a result to every system (D19). */
 export async function postToCore(payload: VerifyResponse): Promise<PostToCoreResponse> {
   return requestJson<PostToCoreResponse>(

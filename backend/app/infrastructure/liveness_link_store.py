@@ -22,7 +22,7 @@ from functools import lru_cache
 from typing import Literal
 from uuid import uuid4
 
-from sqlalchemy import Float, String, create_engine, text
+from sqlalchemy import Float, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -88,11 +88,7 @@ class LivenessLinkStore:
     def __init__(self, database_url: str) -> None:
         self._database_url = resolve_auth_database_url(database_url)
         try:
-            engine = _engine_for(self._database_url)
-            _Base.metadata.create_all(engine)
-            # The single fixed page this design replaces owned its own table.
-            with engine.begin() as connection:
-                connection.execute(text("DROP TABLE IF EXISTS liveness_display_settings"))
+            _Base.metadata.create_all(_engine_for(self._database_url))
         except SQLAlchemyError as exc:
             raise RuntimeError("liveness link store is unreachable") from exc
 

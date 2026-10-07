@@ -13,6 +13,7 @@ import { TellerDashboard } from './TellerDashboard'
 import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
 import type * as OnboardingSocketModule from '../features/onboarding/onboardingSocket'
 
+import { writeScreenMode } from '../features/onboarding/displayRoom'
 import { makeLivenessLink } from '../test/fixtures'
 
 /**
@@ -21,14 +22,20 @@ import { makeLivenessLink } from '../test/fixtures'
  * background — frames arrive at ~12 fps, and one that had not decoded yet
  * blanked the box — so the canvas rule is asserted here as well as in the
  * workspace's own feed: a frame is only ever added, never taken off.
+ *
+ * Whichever room the dialog selected for this browser is the room it opens:
+ * the officer's link by default, the counter's standby screen when that
+ * screen is chosen.
  */
 
-function stubSettings() {
+function stubSettings(
+  payload: unknown = { links: [makeLivenessLink({ token: 'sess_fixed_1' })] },
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ links: [makeLivenessLink({ token: 'sess_fixed_1' })] }), {
+        new Response(JSON.stringify(payload), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -74,8 +81,8 @@ function stubCanvas() {
   return { draws }
 }
 
-async function mountDashboard() {
-  stubSettings()
+async function mountDashboard(payload?: unknown) {
+  stubSettings(payload)
   const send = vi.fn()
   const story: { h: ((envelope: OnboardingEnvelope) => void) | null } = { h: null }
   openOnboardingSocket.mockImplementation(
@@ -133,5 +140,18 @@ describe('TellerDashboard', () => {
       expect(canvas.draws).toEqual(['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB']),
     )
     expect(screen.getByLabelText('Customer camera')).toBeInTheDocument()
+  })
+
+  it('opens the standby room and its URL when that screen is chosen', async () => {
+    writeScreenMode('static')
+    await mountDashboard({ enabled: true, sessionId: 'sess_standby_1' })
+
+    expect(openOnboardingSocket).toHaveBeenCalledWith(
+      'sess_standby_1',
+      'teller',
+      expect.any(Function),
+      expect.any(Function),
+    )
+    expect(screen.getByText('/display?session=sess_standby_1')).toBeInTheDocument()
   })
 })

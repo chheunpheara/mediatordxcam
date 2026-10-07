@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 
+import {
+  SCREEN_MODE_CHANGED,
+  fetchDisplayRoom,
+} from '../features/onboarding/displayRoom'
 import { onboardingRefusalMessage, openOnboardingSocket } from '../features/onboarding/onboardingSocket'
 import type { OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
 import { useLiveFrame } from '../features/onboarding/useLiveFrame'
-import { fetchActiveLivenessLink } from '../lib/api'
 
 /**
  * Screen A (teller dashboard).
  *
- * On mount it creates a session and opens the customer's tab at
- * `/display?session={id}`. The teller controls the customer tab over the
- * WebSocket, and the customer's webcam frames arrive back at ~12 fps and
- * are shown in the preview below. A "Start liveness check" click on this
- * tab queues a 3-second recording on the customer screen.
+ * On mount it joins whichever room the dialog selected for this browser — the
+ * customer's link, or the counter's standby screen — and opens the customer's
+ * tab at `/display?session={id}`. With neither available it mints an ad-hoc
+ * session, so the dashboard stays usable before any link exists. The teller
+ * controls the customer tab over the WebSocket, and the customer's webcam
+ * frames arrive back at ~12 fps and are shown in the preview below. A "Start
+ * liveness check" click on this tab queues a 3-second recording on the
+ * customer screen.
  */
 export function TellerDashboard() {
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -35,15 +41,29 @@ export function TellerDashboard() {
   }
 
   useEffect(() => {
-    // The officer's open link, if there is one: the customer monitor is
+    // The officer's chosen room, if there is one: the customer monitor is
     // already on that URL, so this tab joins the same room. Otherwise mint an
-    // ad-hoc session, so the dashboard stays usable before any link exists.
-    fetchActiveLivenessLink()
-      .then((link) => {
-        if (link?.token) setSessionId(link.token)
-        else fallbackCreateAdhocSession()
-      })
-      .catch(() => fallbackCreateAdhocSession())
+    // ad-hoc session, so the dashboard stays usable before any room exists.
+    // Switching screens in the dialog re-picks it here.
+    let done = false
+    const pickRoom = () => {
+      setError(null)
+      fetchDisplayRoom()
+        .then((room) => {
+          if (done) return
+          if (room.token !== null) setSessionId(room.token)
+          else fallbackCreateAdhocSession()
+        })
+        .catch(() => {
+          if (!done) fallbackCreateAdhocSession()
+        })
+    }
+    pickRoom()
+    window.addEventListener(SCREEN_MODE_CHANGED, pickRoom)
+    return () => {
+      done = true
+      window.removeEventListener(SCREEN_MODE_CHANGED, pickRoom)
+    }
   }, [])
 
   useEffect(() => {

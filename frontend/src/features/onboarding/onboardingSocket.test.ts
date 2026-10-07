@@ -141,6 +141,10 @@ describe('onboardingRefusalMessage', () => {
     expect(onboardingRefusalMessage(4410, 'customer')).toMatch(/expired/i)
     expect(onboardingRefusalMessage(4411, 'customer')).toMatch(/replaced/i)
     expect(onboardingRefusalMessage(4404, 'customer')).toMatch(/ask the officer/i)
+    // The standby screen is not a link, so it never tells a customer to ask
+    // for a new one — the officer simply switches the counter screen back on.
+    expect(onboardingRefusalMessage(4412, 'customer')).toMatch(/standby screen/i)
+    expect(onboardingRefusalMessage(4412, 'customer')).toMatch(/wait for the officer/i)
   })
 
   it('tells the officer what to do about the room', () => {
@@ -148,6 +152,8 @@ describe('onboardingRefusalMessage', () => {
     expect(onboardingRefusalMessage(4411, 'teller')).toMatch(/newer link/i)
     expect(onboardingRefusalMessage(4404, 'teller')).toMatch(/reload/i)
     expect(onboardingRefusalMessage(4403, 'teller')).toMatch(/another officer/i)
+    expect(onboardingRefusalMessage(4412, 'teller')).toMatch(/standby screen/i)
+    expect(onboardingRefusalMessage(4412, 'teller')).toMatch(/switched off/i)
   })
 
   it('says nothing about an ordinary close', () => {

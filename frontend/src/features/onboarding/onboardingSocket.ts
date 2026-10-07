@@ -52,6 +52,8 @@ export function onboardingRefusalMessage(
         return 'This link has expired. Please ask the officer for a new one.'
       case 4411:
         return 'This link has been replaced. Please ask the officer for a new one.'
+      case 4412:
+        return 'This standby screen is switched off. Please wait for the officer.'
       default:
         return null
     }
@@ -65,6 +67,8 @@ export function onboardingRefusalMessage(
       return 'This link has expired. Create a new one to reach the customer screen.'
     case 4411:
       return 'A newer link has replaced this one. Reload your links to use it.'
+    case 4412:
+      return 'The standby screen is switched off. Turn it on in Liveness Links.'
     default:
       return null
   }

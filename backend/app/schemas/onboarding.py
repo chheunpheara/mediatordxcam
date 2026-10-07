@@ -28,6 +28,19 @@ class VerifyLivenessResponse(BaseModel):
     livenessRef: str = Field(description="Opaque handle for the stored webm/mp4")
 
 
+class ShowFixedPage(BaseModel):
+    """Standby-screen settings: the one permanent room for the counter monitor."""
+
+    enabled: bool
+    #: Stable token that never rotates, so the URL pasted on the standby
+    #: monitor survives redeploys, reloads and every toggle.
+    sessionId: str
+
+
+class UpdateFixedPage(BaseModel):
+    enabled: bool
+
+
 class LivenessLinkOwner(BaseModel):
     """The officer who minted a link — how the administrator view tells links apart."""
 

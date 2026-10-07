@@ -2,23 +2,42 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { routes } from '../../app/routes'
 import { useAuthUser } from '../../features/auth/authContext'
-import { ApiError, createLivenessLink, fetchLivenessLinks } from '../../lib/api'
-import type { CreatedLivenessLink, LivenessLink } from '../../lib/api'
+import {
+  readScreenMode,
+  writeScreenMode,
+} from '../../features/onboarding/displayRoom'
+import type { ScreenMode } from '../../features/onboarding/displayRoom'
+import {
+  ApiError,
+  createLivenessLink,
+  fetchLivenessLinks,
+  fetchLivenessPageSettings,
+  saveLivenessPageSettings,
+} from '../../lib/api'
+import type { CreatedLivenessLink, LivenessLink, LivenessPageSettings } from '../../lib/api'
 
 /**
- * The officer's liveness links: mint one for a named customer, read the URL
- * off it, and see which of their links are still usable.
+ * The officer's liveness rooms: the counter's standby screen, and one link
+ * per customer.
+ *
+ * Which of the two the teller panels join is a choice this dialog makes for
+ * the browser — **Standby screen** for the monitor on the counter (one URL,
+ * minted once, switched on here, and open for any customer who sits down) or
+ * **Unique link** for a customer who is not in the room (minted below, with
+ * its own expiry). Both URLs are shown side by side so the right one can be
+ * copied without guessing which mode is in force.
  *
  * The server owns every rule — one usable link per officer (a new mint
- * supersedes the previous one), expiry checked at request time, no read-only
- * "enabled" switch any more. This dialog only collects what a mint needs (a
- * customer label and when it should stop working) and shows back what the
- * server reports, including links that are already `Expired`, so a customer
- * returning tomorrow is still findable by name.
+ * supersedes the previous one), expiry checked at request time, a standby
+ * room that never expires and is never superseded. This dialog only collects
+ * what a mint needs (a customer label and when it should stop working) and
+ * shows back what the server reports, including links that are already
+ * `Expired`, so a customer returning tomorrow is still findable by name.
  *
  * A link's token is a secret: it is shown only for links this officer owns,
  * which is also all the server ever sends back (`token: null` for anyone
- * else's row).
+ * else's row). The standby URL is deliberately not a secret — it is a room,
+ * not a person's link, and any officer may switch it on.
  *
  * Three exits, like the post-settings dialog: Close, Escape, the backdrop.
  * Opening moves focus to Close; closing returns it to the button that opened
@@ -26,6 +45,10 @@ import type { CreatedLivenessLink, LivenessLink } from '../../lib/api'
  */
 export function LivenessPageModal({ onClose }: { readonly onClose: () => void }) {
   const user = useAuthUser()
+  const [screen, setScreen] = useState<ScreenMode>(() => readScreenMode())
+  const [standby, setStandby] = useState<LivenessPageSettings | null>(null)
+  const [standbyError, setStandbyError] = useState<string | null>(null)
+  const [savingStandby, setSavingStandby] = useState(false)
   const [links, setLinks] = useState<readonly LivenessLink[] | null>(null)
   const [scope, setScope] = useState<'own' | 'all'>('own')
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -35,7 +58,7 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [minted, setMinted] = useState<CreatedLivenessLink | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'link' | 'standby' | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -50,6 +73,44 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
       opener?.focus()
     }
   }, [onClose])
+
+  // The standby room: one row, so a failure here says nothing about links.
+  useEffect(() => {
+    let cancelled = false
+    fetchLivenessPageSettings()
+      .then((settings) => {
+        if (!cancelled) setStandby(settings)
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return
+        setStandbyError(
+          cause instanceof ApiError ? cause.message : 'Something went wrong. Please try again.',
+        )
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const chooseScreen = (mode: ScreenMode): void => {
+    setScreen(mode)
+    // Tells the teller panels already open to move to the other room.
+    writeScreenMode(mode)
+  }
+
+  const toggleStandby = async (enabled: boolean): Promise<void> => {
+    setSavingStandby(true)
+    setStandbyError(null)
+    try {
+      setStandby(await saveLivenessPageSettings(enabled))
+    } catch (cause: unknown) {
+      setStandbyError(
+        cause instanceof ApiError ? cause.message : 'Something went wrong. Please try again.',
+      )
+    } finally {
+      setSavingStandby(false)
+    }
+  }
 
   const loadLinks = async (activeScope: 'own' | 'all'): Promise<void> => {
     try {
@@ -115,12 +176,12 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
     }
   }
 
-  const handleCopy = async (url: string): Promise<void> => {
+  const handleCopy = async (url: string, which: 'link' | 'standby'): Promise<void> => {
     try {
       await navigator.clipboard?.writeText(url)
-      setCopied(true)
+      setCopied(which)
     } catch {
-      setCopied(false)
+      setCopied(null)
     }
   }
 
@@ -134,6 +195,13 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
     usableToken === null
       ? null
       : `${window.location.origin}${routes.display}?session=${usableToken}`
+
+  // The counter monitor's URL: minted once, so it never has to be re-read
+  // from a list of links — the row itself is the whole of it.
+  const standbyUrl =
+    standby === null
+      ? null
+      : `${window.location.origin}${routes.display}?session=${standby.sessionId}`
 
   // Grouped by customer, newest group first, exactly as the server listed
   // them — so yesterday's expired rows sit under the same name as today's.
@@ -158,7 +226,7 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
       <div
         aria-label="Liveness links"
         aria-modal="true"
-        className="bg-surface text-ink w-full max-w-xl rounded-lg p-6"
+        className="bg-surface text-ink max-h-[90vh] w-full max-w-xl overflow-auto rounded-lg p-6"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
       >
@@ -166,8 +234,9 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
           <div>
             <h2 className="text-lg font-semibold">Liveness links</h2>
             <p className="text-ink-subtle mt-1 text-xs">
-              One link per customer, open for as long as you choose. Creating a new one stops the
-              previous link, so only the newest URL works on the customer monitor.
+              Pick the screen your teller panels join: the standby URL on the counter, or a link
+              for the customer you are serving now. A new link stops the previous one, so only the
+              newest link URL works on the customer monitor.
             </p>
           </div>
           <button
@@ -189,6 +258,90 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
           </p>
         ) : null}
 
+        <fieldset className="border-border mt-5 rounded-lg border p-4">
+          <legend className="text-sm font-semibold">Screen to drive</legend>
+          <p className="text-ink-subtle mt-1 text-xs">
+            The camera feed, the face capture and the dashboard on this computer join whichever
+            room you pick here.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              aria-pressed={screen === 'static'}
+              className="btn-secondary px-3 py-1.5 text-xs"
+              onClick={() => chooseScreen('static')}
+              type="button"
+            >
+              Standby screen
+            </button>
+            <button
+              aria-pressed={screen === 'unique'}
+              className="btn-secondary px-3 py-1.5 text-xs"
+              onClick={() => chooseScreen('unique')}
+              type="button"
+            >
+              Unique link
+            </button>
+          </div>
+        </fieldset>
+
+        <section aria-label="Standby screen" className="mt-5">
+          <h3 className="text-sm font-semibold">Standby screen URL</h3>
+          <p className="text-ink-subtle mt-1 text-xs">
+            Open this once on the counter monitor. It never expires and never changes, and it
+            serves any customer who sits down — switch it off when the counter is closed.
+          </p>
+
+          {standbyError ? (
+            <p
+              className="border-negative bg-negative-soft text-negative mt-3 rounded-lg border px-4 py-3 text-sm"
+              role="alert"
+            >
+              {standbyError}
+            </p>
+          ) : null}
+
+          {standby === null && standbyError === null ? (
+            <p className="text-ink-subtle mt-3 text-xs" role="status">
+              Contacting the standby screen…
+            </p>
+          ) : null}
+
+          {standbyUrl !== null ? (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                aria-label="Standby URL"
+                className="border-border bg-surface-sunken text-ink w-full rounded-md border px-3 py-2 font-mono text-xs"
+                id="liveness-standby-url"
+                readOnly
+                value={standbyUrl}
+              />
+              <button
+                className="btn-secondary shrink-0 px-3 py-2 text-xs"
+                onClick={() => void handleCopy(standbyUrl, 'standby')}
+                type="button"
+              >
+                {copied === 'standby' ? 'Copied.' : 'Copy link'}
+              </button>
+            </div>
+          ) : null}
+
+          <label className="text-ink-subtle mt-3 flex items-center gap-2 text-xs">
+            <input
+              checked={standby?.enabled ?? false}
+              disabled={standby === null || savingStandby}
+              name="liveness-standby-enabled"
+              onChange={(event) => void toggleStandby(event.target.checked)}
+              type="checkbox"
+            />
+            Standby screen is in service
+          </label>
+          <p className="text-ink-subtle mt-2 text-xs">
+            {standby?.enabled
+              ? 'Your teller panels can join this room now.'
+              : 'Your teller panels stay out of this room until you switch it on.'}
+          </p>
+        </section>
+
         {displayUrl !== null ? (
           <div className="mt-5">
             <label className="text-sm font-semibold" htmlFor="liveness-page-url">
@@ -204,10 +357,10 @@ export function LivenessPageModal({ onClose }: { readonly onClose: () => void })
               />
               <button
                 className="btn-secondary shrink-0 px-3 py-2 text-xs"
-                onClick={() => void handleCopy(displayUrl)}
+                onClick={() => void handleCopy(displayUrl, 'link')}
                 type="button"
               >
-                {copied ? 'Copied.' : 'Copy link'}
+                {copied === 'link' ? 'Copied.' : 'Copy link'}
               </button>
             </div>
             <p className="text-ink-subtle mt-2 text-xs">

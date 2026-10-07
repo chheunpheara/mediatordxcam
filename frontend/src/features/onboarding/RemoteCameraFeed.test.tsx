@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const openOnboardingSocket = vi.hoisted(() => vi.fn())
@@ -18,6 +18,7 @@ import type { OnboardingEnvelope } from './onboardingSocket'
 import type * as OnboardingSocketModule from './onboardingSocket'
 
 import { artifactUrl } from '../../lib/api'
+import { writeScreenMode } from './displayRoom'
 import { makeLivenessLink } from '../../test/fixtures'
 
 /**
@@ -225,6 +226,67 @@ describe('RemoteCameraFeed', () => {
       await screen.findByText(/no liveness link is open yet/i),
     ).toBeInTheDocument()
     expect(openOnboardingSocket).not.toHaveBeenCalled()
+  })
+
+  it('joins the counter standby room when that screen is chosen', async () => {
+    writeScreenMode('static')
+    stubSettings({ enabled: true, sessionId: 'sess_standby_1' })
+    const send = vi.fn()
+    openOnboardingSocket.mockReturnValue({ send, close: vi.fn() })
+
+    render(<RemoteCameraFeed />)
+
+    await waitFor(() => expect(openOnboardingSocket).toHaveBeenCalledTimes(1))
+    expect(openOnboardingSocket).toHaveBeenCalledWith(
+      'sess_standby_1',
+      'teller',
+      expect.any(Function),
+      expect.any(Function),
+    )
+    expect(send).toHaveBeenCalledWith({ type: 'activateLiveness' })
+  })
+
+  it('says the standby screen is switched off rather than joining it', async () => {
+    writeScreenMode('static')
+    stubSettings({ enabled: false, sessionId: 'sess_standby_1' })
+    openOnboardingSocket.mockReturnValue({ send: vi.fn(), close: vi.fn() })
+
+    render(<RemoteCameraFeed />)
+
+    expect(await screen.findByText(/standby screen is turned off/i)).toBeInTheDocument()
+    expect(openOnboardingSocket).not.toHaveBeenCalled()
+  })
+
+  it('leaves the link room and joins the standby room when the screen switches', async () => {
+    stubSettings(LINKS)
+    const close = vi.fn()
+    openOnboardingSocket.mockReturnValue({ send: vi.fn(), close })
+
+    render(<RemoteCameraFeed />)
+    await waitFor(() => expect(openOnboardingSocket).toHaveBeenCalledTimes(1))
+    expect(openOnboardingSocket).toHaveBeenLastCalledWith(
+      'sess_fixed_1',
+      'teller',
+      expect.any(Function),
+      expect.any(Function),
+    )
+
+    stubSettings({ enabled: true, sessionId: 'sess_standby_1' })
+    await act(async () => {
+      writeScreenMode('static')
+      // Let the settings fetch settle while React is still listening, so the
+      // panel's re-render is part of this act rather than after it.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    await waitFor(() => expect(openOnboardingSocket).toHaveBeenCalledTimes(2))
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(openOnboardingSocket).toHaveBeenLastCalledWith(
+      'sess_standby_1',
+      'teller',
+      expect.any(Function),
+      expect.any(Function),
+    )
   })
 
   it('names the refusal when the room closes under it', async () => {

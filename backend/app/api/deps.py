@@ -19,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.domain.auth import ALL_PERMISSIONS, Role, User, UserStatus
 from app.infrastructure.liveness_link_store import LivenessLinkStore
+from app.infrastructure.liveness_settings_store import LivenessSettingsStore
 from app.integrations.camdx.mock.ocr import MockOcrProvider
 from app.integrations.camdx.ocr import OcrProvider
 from app.services.artifacts import TempArtifactStore
@@ -275,12 +276,29 @@ def integration_service_provider(request: Request, settings: SettingsDep) -> Int
 IntegrationServiceDep = Annotated[IntegrationService, Depends(integration_service_provider)]
 
 
+def liveness_settings_provider(request: Request, settings: SettingsDep) -> LivenessSettingsStore:
+    """The standby-screen room's permanent token, built once per application.
+
+    Cached on `app.state` like the account service; construction creates the
+    schema, so FastAPI runs this sync provider in a worker thread.
+    """
+    cached: LivenessSettingsStore | None = getattr(
+        request.app.state, "liveness_settings_store", None
+    )
+    if cached is None:
+        cached = LivenessSettingsStore(settings.database_url or "")
+        request.app.state.liveness_settings_store = cached
+    return cached
+
+
+LivenessSettingsDep = Annotated[LivenessSettingsStore, Depends(liveness_settings_provider)]
+
+
 def liveness_link_provider(request: Request, settings: SettingsDep) -> LivenessLinkStore:
     """The per-customer link table, built once per application.
 
     Cached on `app.state` like the account service; construction creates the
-    schema (and retires the table the fixed page used), so FastAPI runs this
-    sync provider in a worker thread.
+    schema, so FastAPI runs this sync provider in a worker thread.
     """
     cached: LivenessLinkStore | None = getattr(request.app.state, "liveness_link_store", None)
     if cached is None:

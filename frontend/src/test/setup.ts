@@ -6,6 +6,7 @@ import { afterEach, beforeEach } from 'vitest'
 
 import { clearAuthUser, writeAuthUser } from '@/lib/auth'
 import { resetDocumentStore } from '@/lib/documentStore'
+import { resetScreenMode } from '@/features/onboarding/displayRoom'
 import { TEST_AUTH_USER } from './fixtures'
 
 /**
@@ -31,5 +32,8 @@ afterEach(() => {
   } catch {
     // ignore
   }
+  // The screen a test chose is this browser's, not the application's: the
+  // next test must start on the default room rather than a leftover one.
+  resetScreenMode()
   clearAuthUser()
 })
