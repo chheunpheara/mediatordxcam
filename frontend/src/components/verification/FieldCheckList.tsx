@@ -57,8 +57,12 @@ function Row({
   readonly status: FieldCheckStatus
   readonly word: string
 }) {
+  // A mismatch pulses its background in and out so the eye lands on it: the
+  // cross and the word stay beside it, so the pulse is a nudge and never the
+  // only thing carrying the meaning (§32).
+  const attention = status === 'mismatch' ? ' verify-row--attention' : ''
   return (
-    <li className="flex items-center justify-between gap-3 px-3 py-1.5">
+    <li className={`verify-row--in${attention} flex items-center justify-between gap-3 px-3 py-1.5`}>
       <span>{label}</span>
       <span className={`flex items-center gap-1.5 font-medium ${statusTone(status)}`}>
         <StatusIcon status={status} />

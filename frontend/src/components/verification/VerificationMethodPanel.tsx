@@ -1,10 +1,10 @@
+import { useState } from 'react'
+
 import { useVerification } from '../../features/verification/VerificationContext'
 import { FaceCapturePanel } from '../../features/face-capture/FaceCapturePanel'
 import { RemoteCameraFeed } from '../../features/onboarding/RemoteCameraFeed'
 import { RemoteFaceCapture } from '../../features/onboarding/RemoteFaceCapture'
-import { FieldCheckList } from './FieldCheckList'
-import { PostToCoreAction } from './PostToCoreAction'
-import { sectionsOf } from './sectionRows'
+import { VerificationModal } from './VerificationModal'
 import { runStatusSentence } from './statusDisplay'
 
 /**
@@ -19,6 +19,12 @@ import { runStatusSentence } from './statusDisplay'
  * official methods to be displayed; the pending ones carry the backend's own
  * explanation instead of being hidden, so the app does not look like it supports
  * fewer than it does.
+ *
+ * The run and its report live in `VerificationModal`: pressing Verify opens it
+ * and starts the check, and the panel keeps only what has to be chosen or
+ * supplied before that — method, inputs, the button, and the sentence saying
+ * why it cannot be pressed yet. Once a run exists, "Open report" brings the
+ * dialog back without spending another call.
  */
 export function VerificationMethodPanel() {
   const {
@@ -31,127 +37,141 @@ export function VerificationMethodPanel() {
     verify,
     error,
     result,
-    history,
   } = useVerification()
+  const [reportOpen, setReportOpen] = useState(false)
 
   const chosen = methods.find((m) => m.method === selected) ?? null
 
+  const startVerify = (): void => {
+    setReportOpen(true)
+    void verify()
+  }
+
   return (
-    <section className="card p-5" aria-label="Verification method">
-      <h2 className="text-ink-subtle text-sm font-semibold">Verification Method</h2>
-      <p className="text-ink-subtle mt-1 text-xs">
-        Choose how your identity should be checked.
-      </p>
-
-      {methods.length === 0 ? (
-        <p className="text-ink-subtle mt-4 text-xs" role="status">
-          Loading the verification methods…
+    <>
+      <section aria-label="Verification method" className="card p-5">
+        <h2 className="text-ink-subtle text-sm font-semibold">Verification Method</h2>
+        <p className="text-ink-subtle mt-1 text-xs">
+          Choose how your identity should be checked.
         </p>
-      ) : (
-        <div className="mt-4">
-          <label className="block" htmlFor="verification-method-select">
-            <span className="text-ink-muted block text-xs font-medium">Method</span>
-            <select
-              className="border-border bg-surface text-ink focus:border-brand mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-              id="verification-method-select"
-              name="verification-method"
-              aria-label="Verification method"
-              onChange={(event) =>
-                select(event.target.value as (typeof methods)[number]['method'])
-              }
-              value={selected ?? ''}
-            >
-              {methods.map((method) => (
-                <option key={method.method} value={method.method}>
-                  {method.label} — {method.officialName}
-                </option>
-              ))}
-            </select>
-          </label>
 
-          {selected && (
-            <div className="border-border bg-surface-sunken mt-3 rounded-lg border p-3">
-              {(() => {
-                const method = methods.find((m) => m.method === selected)
-                if (!method) return null
-                const runnable = method.available && !method.isOcr
-                return (
-                  <>
-                    <p className="text-sm font-semibold">{method.label}</p>
-                    <p className="text-ink-subtle block text-xs">{method.officialName}</p>
-                    <RequiresList method={method} />
-                    {!runnable && method.unavailableReason ? (
-                      <span className="text-ink-subtle mt-1 block text-xs leading-relaxed">
-                        {method.unavailableReason}
-                      </span>
-                    ) : null}
-                  </>
-                )
-              })()}
-            </div>
-          )}
-        </div>
-      )}
+        {methods.length === 0 ? (
+          <p className="text-ink-subtle mt-4 text-xs" role="status">
+            Loading the verification methods…
+          </p>
+        ) : (
+          <div className="mt-4">
+            <label className="block" htmlFor="verification-method-select">
+              <span className="text-ink-muted block text-xs font-medium">Method</span>
+              <select
+                aria-label="Verification method"
+                className="border-border bg-surface text-ink focus:border-brand mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+                id="verification-method-select"
+                name="verification-method"
+                onChange={(event) =>
+                  select(event.target.value as (typeof methods)[number]['method'])
+                }
+                value={selected ?? ''}
+              >
+                {methods.map((method) => (
+                  <option key={method.method} value={method.method}>
+                    {method.label} — {method.officialName}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-      {chosen?.requiresCurrentFace ? (
-        <>
-          <RemoteFaceCapture />
-          <FaceCapturePanel />
-        </>
-      ) : null}
+            {selected ? (
+              <div className="border-border bg-surface-sunken mt-3 rounded-lg border p-3">
+                {(() => {
+                  const method = methods.find((m) => m.method === selected)
+                  if (!method) return null
+                  const runnable = method.available && !method.isOcr
+                  return (
+                    <>
+                      <p className="text-sm font-semibold">{method.label}</p>
+                      <p className="text-ink-subtle block text-xs">{method.officialName}</p>
+                      <RequiresList method={method} />
+                      {!runnable && method.unavailableReason ? (
+                        <span className="text-ink-subtle mt-1 block text-xs leading-relaxed">
+                          {method.unavailableReason}
+                        </span>
+                      ) : null}
+                    </>
+                  )
+                })()}
+              </div>
+            ) : null}
+          </div>
+        )}
 
-      {chosen?.requiresLiveness ? <RemoteCameraFeed /> : null}
+        {chosen?.requiresCurrentFace ? (
+          <>
+            <RemoteFaceCapture />
+            <FaceCapturePanel />
+          </>
+        ) : null}
 
-      <button
-        className="btn-primary mt-4 w-full"
-        disabled={!canVerify || verifying}
-        onClick={() => void verify()}
-        type="button"
-      >
-        {verifying ? 'Checking…' : 'Verify'}
-      </button>
+        {chosen?.requiresLiveness ? <RemoteCameraFeed /> : null}
 
-      {blockingReason ? (
-        <p className="text-ink-subtle mt-2 text-xs leading-relaxed" role="status">
-          {blockingReason}
-        </p>
-      ) : null}
-
-      {error ? (
-        <p
-          className="border-negative bg-negative-soft text-negative mt-3 rounded-lg border px-3 py-2 text-xs"
-          role="alert"
+        <button
+          className="btn-primary mt-4 w-full"
+          disabled={!canVerify || verifying}
+          onClick={startVerify}
+          type="button"
         >
-          {error}
-        </p>
-      ) : null}
+          {verifying ? 'Checking…' : 'Verify'}
+        </button>
 
-      {result ? (
-        <>
-          <h3 className="text-ink-subtle mt-4 text-sm font-semibold">Verification Response</h3>
-          <div
-            className="border-border bg-surface-sunken mt-2 rounded-lg border p-3"
-            role="status"
-            aria-label="Verification result"
+        {blockingReason ? (
+          <p className="text-ink-subtle mt-2 text-xs leading-relaxed" role="status">
+            {blockingReason}
+          </p>
+        ) : null}
+
+        {error ? (
+          <p
+            className="border-negative bg-negative-soft text-negative mt-3 rounded-lg border px-3 py-2 text-xs"
+            role="alert"
           >
+            {error}
+          </p>
+        ) : null}
+
+        {result ? (
+          <div className="border-border bg-surface-sunken mt-4 rounded-lg border p-3">
             <p className="text-ink text-sm font-semibold">{runStatusSentence(result.status)}</p>
             <p className="text-ink-muted mt-1 text-xs">
               {result.identity.matchedCount} of {result.identity.fields.length} details matched.
             </p>
-            <FieldCheckList fields={result.identity.fields} sections={sectionsOf(history)} />
-            <p className="text-ink-subtle mt-2 text-xs">
-              This is an in-app check against the backend sample. It does not contact CamDX yet.
-            </p>
+            <button
+              className="btn-secondary mt-3 w-full"
+              onClick={() => setReportOpen(true)}
+              type="button"
+            >
+              Open report
+            </button>
           </div>
-          <PostToCoreAction />
-        </>
-      ) : null}
-    </section>
+        ) : null}
+      </section>
+
+      {reportOpen ? <VerificationModal onClose={() => setReportOpen(false)} /> : null}
+    </>
   )
 }
 
 /** What this method asks for, in the user's words (§10). */
-function RequiresList({ method }: { method: { requiresUserInfo: boolean; requiresCurrentFace: boolean; requiresIdCard: boolean; requiresLiveness: boolean; requiresPassport: boolean } }) {
+function RequiresList({
+  method,
+}: {
+  method: {
+    requiresUserInfo: boolean
+    requiresCurrentFace: boolean
+    requiresIdCard: boolean
+    requiresLiveness: boolean
+    requiresPassport: boolean
+  }
+}) {
   const needs = [
     method.requiresUserInfo && 'identity information',
     method.requiresCurrentFace && 'your current face',

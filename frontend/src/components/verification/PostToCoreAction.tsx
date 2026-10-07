@@ -19,7 +19,7 @@ import { canPostToCore } from '../../lib/auth'
  * outcome, dismissed by OK, Escape or the backdrop — never a toast that
  * vanishes before a partial failure can be read.
  */
-export function PostToCoreAction() {
+export function PostToCoreAction({ className = 'btn-secondary mt-3 w-full' }: { readonly className?: string }) {
   const user = useAuthUser()
   const { result } = useVerification()
   const [posting, setPosting] = useState(false)
@@ -46,7 +46,7 @@ export function PostToCoreAction() {
   return (
     <>
       <button
-        className="btn-secondary mt-3 w-full"
+        className={className}
         disabled={posting}
         onClick={() => void handlePost()}
         type="button"

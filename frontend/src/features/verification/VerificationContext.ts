@@ -1,6 +1,6 @@
 import { createContext, use } from 'react'
 
-import type { VerificationMethod, VerificationMethodId, VerifyResponse } from '../../lib/api'
+import type { IdentityFields, VerificationMethod, VerificationMethodId, VerifyResponse } from '../../lib/api'
 
 /**
  * Verification method selection and result state (§10, §11).
@@ -10,6 +10,28 @@ import type { VerificationMethod, VerificationMethodId, VerifyResponse } from '.
  * what a method requires, so they read the same objects rather than each keeping
  * its own idea.
  */
+
+/**
+ * The inputs the session can supply to `POST /verify` (§19).
+ *
+ * Carried on the context as well as sent in the request, because the report's
+ * preview column draws the very pictures that were verified — a component that
+ * only saw the response could not show the face it was asked about.
+ */
+export interface SessionInputs {
+  /**
+   * The nine §14 fields as the user left them, or `null` while no result exists.
+   *
+   * Sent verbatim on verify (§19). The corrections the user typed are the values
+   * the government is asked to check, so passing the raw OCR output instead would
+   * silently discard the very corrections §14 exists to enable.
+   */
+  readonly identity: IdentityFields | null
+  readonly documentRef: string | null
+  readonly currentFaceRef: string | null
+  readonly livenessRef: string | null
+  readonly idCardFaceRef: string | null
+}
 
 /** Plain-language name for a missing requirement flag, for the user's benefit. */
 export const REQUIREMENT_LABELS: Readonly<Record<string, string>> = {
@@ -31,6 +53,8 @@ export interface VerificationValue {
   readonly blockingReason: string | null
   readonly verifying: boolean
   readonly result: VerifyResponse | null
+  /** What the session holds, for the report's preview column. */
+  readonly inputs: SessionInputs
   /**
    * Every successful verification this session ran, in order (D16).
    *

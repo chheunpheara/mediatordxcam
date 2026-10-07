@@ -331,8 +331,9 @@ describe('the verify action (§11, §19)', () => {
     // The stub answers every field as matched, so all nine rows read "Matched"
     // with a tick — the response's `identity.fields`, not a client-side recount.
     const card = await screen.findByRole('status', { name: 'Verification result' })
-    const rows = await within(card).findAllByRole('listitem')
-    expect(rows).toHaveLength(9)
+    // The list appends a row at a time, so it is complete only once it says so.
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(9))
+    const rows = within(card).getAllByRole('listitem')
     expect(rows[0]!).toHaveTextContent('National ID')
     for (const row of rows) {
       expect(row).toHaveTextContent('Matched')
@@ -526,6 +527,112 @@ interface VerifyRequestPayload {
   readonly userInformation: Record<string, string | null>
 }
 
+describe('the report dialog (§24)', () => {
+  /** The workspace with the identity form filled and Verify pressed. */
+  async function openReport(verifyResult?: VerifyResponse | VerifyResponse[]) {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await renderWorkspace(makeProcessingResult(), undefined, verifyResult)
+
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+    const panel = await methodPanel()
+    const button = await within(panel).findByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+
+    const report = await screen.findByRole('dialog', { name: 'Verification' })
+    return { panel, report, userEvent }
+  }
+
+  it('opens a large dialog on Verify and moves the report into it', async () => {
+    const { panel, report } = await openReport()
+
+    const card = await within(report).findByRole('status', { name: 'Verification result' })
+    expect(within(report).getByRole('heading', { name: 'Verification Response' })).toBeInTheDocument()
+    // The panel is left with its own summary, not with the list the dialog holds.
+    expect(within(panel).queryByRole('status', { name: 'Verification result' })).toBeNull()
+    expect(within(panel).getByRole('button', { name: 'Open report' })).toBeInTheDocument()
+    // This method was given no picture, so there is one column, not two.
+    expect(within(report).queryByRole('region', { name: 'Preview' })).toBeNull()
+    expect(card).toBeInTheDocument()
+  })
+
+  it('appends the rows a step at a time and only then offers the footer actions', async () => {
+    const { report } = await openReport()
+    const card = await within(report).findByRole('status', { name: 'Verification result' })
+
+    // Nothing may be posted from a report that has not finished arriving.
+    expect(within(report).queryByRole('button', { name: 'Post to Core Systems' })).toBeNull()
+
+    await waitFor(() => {
+      const shown = within(card).getAllByRole('listitem')
+      expect(shown.length).toBeGreaterThan(0)
+      expect(shown.length).toBeLessThan(9)
+    })
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(9))
+    expect(
+      await within(report).findByRole('button', { name: 'Post to Core Systems' }),
+    ).toBeInTheDocument()
+  })
+
+  it('gives a photo method the preview column beside the field list', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await renderWorkspace()
+
+    fireEvent.change(await screen.findByLabelText(/^Date of Birth/), {
+      target: { value: '1994-02-11' },
+    })
+    const panel = await methodPanel()
+    await userEvent.selectOptions(
+      await within(panel).findByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_face',
+    )
+    const upload = document.getElementById('current-face-upload')
+    await waitFor(() => expect(upload).toBeTruthy())
+    fireEvent.change(upload as HTMLInputElement, {
+      target: { files: [new File(['x'], 'face.jpg', { type: 'image/jpeg' })] },
+    })
+    await screen.findByAltText('Captured current face')
+
+    const button = await within(panel).findByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+
+    const report = await screen.findByRole('dialog', { name: 'Verification' })
+    // Two columns: the picture it was given first, the field list beside it.
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+    expect(within(preview).getByAltText('Your live photo')).toBeInTheDocument()
+    expect(
+      await within(report).findByRole('status', { name: 'Verification result' }),
+    ).toBeInTheDocument()
+  })
+
+  it('pulses a field that did not match, beside the cross and the word (§32)', async () => {
+    const base = makeVerifyResult()
+    const mismatched = makeVerifyResult({
+      status: 'partial',
+      identity: {
+        ...base.identity,
+        matchedCount: 8,
+        incorrectFields: ['nationalId'],
+        fields: base.identity.fields.map((field) =>
+          field.field === 'nationalId' ? { ...field, status: 'mismatch' as const } : field,
+        ),
+      },
+    })
+
+    const { report } = await openReport(mismatched)
+    const card = await within(report).findByRole('status', { name: 'Verification result' })
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(9))
+
+    const first = within(card).getAllByRole('listitem')[0]!
+    expect(first).toHaveTextContent('National ID')
+    expect(first).toHaveTextContent('Mismatched')
+    expect(first.className).toContain('verify-row--attention')
+  })
+})
+
 describe('posting the response to core systems (D19)', () => {
   interface PostRoute {
     readonly payload: unknown
@@ -572,8 +679,9 @@ describe('posting the response to core systems (D19)', () => {
     const verify = await within(panel).findByRole('button', { name: 'Verify' })
     await waitFor(() => expect(verify).toBeEnabled())
     await userEvent.click(verify)
-    await screen.findByRole('status', { name: 'Verification result' })
-    return { fetchMock, panel, userEvent }
+    const card = await screen.findByRole('status', { name: 'Verification result' })
+    const report = await screen.findByRole('dialog', { name: 'Verification' })
+    return { fetchMock, panel, report, card, userEvent }
   }
 
   it('titles the result Verification Response, above the card, and posts it', async () => {
@@ -581,14 +689,16 @@ describe('posting the response to core systems (D19)', () => {
       payload: { posted: ['https://core.example/post'], failed: [] },
     })
 
-    const { panel, userEvent } = await verifyFirst(fetchMock)
+    const { report, userEvent } = await verifyFirst(fetchMock)
 
     // The heading owns the section the card sits in — card follows it.
-    const heading = within(panel).getByRole('heading', { name: 'Verification Response' })
-    const card = within(panel).getByRole('status', { name: 'Verification result' })
+    const heading = within(report).getByRole('heading', { name: 'Verification Response' })
+    const card = within(report).getByRole('status', { name: 'Verification result' })
     expect(heading.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
-    await userEvent.click(within(panel).getByRole('button', { name: 'Post to Core Systems' }))
+    // The button lives in the dialog's footer, and only once the run answered.
+    const post = await within(report).findByRole('button', { name: 'Post to Core Systems' })
+    await userEvent.click(post)
 
     const notice = await screen.findByRole('alertdialog', { name: 'Posted' })
     expect(notice).toHaveTextContent('Sent to 1 core system.')
@@ -617,8 +727,8 @@ describe('posting the response to core systems (D19)', () => {
       },
     })
 
-    const { panel, userEvent } = await verifyFirst(fetchMock)
-    await userEvent.click(within(panel).getByRole('button', { name: 'Post to Core Systems' }))
+    const { report, userEvent } = await verifyFirst(fetchMock)
+    await userEvent.click(await within(report).findByRole('button', { name: 'Post to Core Systems' }))
 
     const notice = await screen.findByRole('alertdialog', { name: 'Posted with problems' })
     expect(notice).toHaveTextContent('1 did not accept it.')
@@ -638,8 +748,8 @@ describe('posting the response to core systems (D19)', () => {
       status: 400,
     })
 
-    const { panel, userEvent } = await verifyFirst(fetchMock)
-    await userEvent.click(within(panel).getByRole('button', { name: 'Post to Core Systems' }))
+    const { report, userEvent } = await verifyFirst(fetchMock)
+    await userEvent.click(await within(report).findByRole('button', { name: 'Post to Core Systems' }))
 
     const notice = await screen.findByRole('alertdialog', { name: 'Could not post' })
     expect(notice).toHaveTextContent('There are no core systems configured yet.')
@@ -649,8 +759,11 @@ describe('posting the response to core systems (D19)', () => {
     writeAuthUser({ ...TEST_AUTH_USER, permissions: ['verify_user_info'] })
     const fetchMock = stubWorkspaceWithPost({ payload: { posted: [], failed: [] } })
 
-    const { panel } = await verifyFirst(fetchMock)
+    const { panel, report } = await verifyFirst(fetchMock)
 
+    // Neither place the button could sit — the panel it used to live in, and
+    // the dialog footer it now waits in — offers it.
     expect(within(panel).queryByRole('button', { name: 'Post to Core Systems' })).not.toBeInTheDocument()
+    expect(within(report).queryByRole('button', { name: 'Post to Core Systems' })).not.toBeInTheDocument()
   })
 })

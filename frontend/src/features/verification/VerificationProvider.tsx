@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { ApiError, IDENTITY_FIELDS, fetchVerificationMethods, verify } from '../../lib/api'
-import type {
-  IdentityFields,
-  VerificationMethod,
-  VerificationMethodId,
-  VerifyResponse,
-} from '../../lib/api'
+import type { VerificationMethod, VerificationMethodId, VerifyResponse } from '../../lib/api'
 
 import { VerificationContext } from './VerificationContext'
-import type { VerificationValue } from './VerificationContext'
+import type { SessionInputs, VerificationValue } from './VerificationContext'
 
 /**
  * Owns the method list and the verify call for the session.
@@ -24,20 +19,7 @@ import type { VerificationValue } from './VerificationContext'
  */
 
 /** Which requirement flags the session currently satisfies. */
-export interface SessionInputs {
-  /**
-   * The nine §14 fields as the user left them, or `null` while no result exists.
-   *
-   * Sent verbatim on verify (§19). The corrections the user typed are the values
-   * the government is asked to check, so passing the raw OCR output instead would
-   * silently discard the very corrections §14 exists to enable.
-   */
-  readonly identity: IdentityFields | null
-  readonly documentRef: string | null
-  readonly currentFaceRef: string | null
-  readonly livenessRef: string | null
-  readonly idCardFaceRef: string | null
-}
+export type { SessionInputs }
 
 export function VerificationProvider({
   children,
@@ -169,12 +151,13 @@ export function VerificationProvider({
       blockingReason,
       verifying,
       result,
+      inputs,
       history,
       error,
       verify: runVerify,
       reset,
     }),
-    [methods, selected, missing, chosen, blockingReason, verifying, result, history, error, runVerify, reset],
+    [methods, selected, missing, chosen, blockingReason, verifying, result, inputs, history, error, runVerify, reset],
   )
 
   return <VerificationContext value={value}>{children}</VerificationContext>
