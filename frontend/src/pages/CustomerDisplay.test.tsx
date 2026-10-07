@@ -358,4 +358,46 @@ describe('CustomerDisplayPage', () => {
     await waitFor(() => expect(camera.getUserMedia).toHaveBeenCalledTimes(2))
     expect(screen.queryByAltText('Your recorded preview')).toBeNull()
   })
+
+  it('reports an upload a proxy refused with HTML as a readable failure', async () => {
+    const camera = stubCamera()
+    const { finishRecording } = stubRecording()
+    // An HTML error page, not JSON — nginx's 413 before the body-size limit
+    // matched the API's. Parsing it would throw at the customer and reach the
+    // teller as the browser's own wording for a failed parse.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response('<html>413 Request Entity Too Large</html>', {
+            status: 413,
+            headers: { 'Content-Type': 'text/html' },
+          }),
+        ),
+      ),
+    )
+    const { send, story } = await mountDisplay()
+
+    story.h?.({ type: 'activateLiveness' })
+    camera.open()
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: 'customerState', state: 'liveness' }),
+    )
+    story.h?.({ type: 'startRecording' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'recordingStarted' }))
+    finishRecording()
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        type: 'error',
+        message: 'Something went wrong. Please try again.',
+      }),
+    )
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'recordingFinished' }))
+    expect(
+      await screen.findByText('Something went wrong. Please try again.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/pattern/i)).toBeNull()
+    expect(screen.queryByText(/SyntaxError/i)).toBeNull()
+  })
 })

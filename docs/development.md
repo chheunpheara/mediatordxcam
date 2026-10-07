@@ -243,6 +243,9 @@ Constraints the nginx config already encodes and any replacement must keep:
 - `/ws` is proxied with the upgrade headers (`Upgrade`, `Connection`) and a long
   read timeout — the fallback would answer the handshake with HTML, the socket
   would never open, and the teller screen would wait for webcam frames forever.
+- `client_max_body_size` stays above the API's `MAX_UPLOAD_BYTES` — nginx's own
+  1 MB default would answer a 3-second liveness clip with an HTML 413, which the
+  browser cannot parse as the JSON error the API would have sent.
 - No `CAMDX_*` variable is passed to this container. It serves static files; it
   has no reason to hold a credential (§30).
 

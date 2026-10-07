@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import { openOnboardingSocket } from '../features/onboarding/onboardingSocket'
 import type { CustomerUiState, OnboardingEnvelope } from '../features/onboarding/onboardingSocket'
+import { verifyLiveness } from '../lib/api'
 import { pickMimeType } from '../features/liveness/mimeTypes'
 import { LivenessArt } from '../components/liveness/LivenessArt'
 
@@ -308,26 +309,22 @@ export function CustomerDisplayPage() {
 
   const uploadBlob = async (blob: Blob) => {
     try {
-      const body = new FormData()
-      body.append('liveness_video', blob, blob.type.includes('mp4') ? 'liveness.mp4' : 'liveness.webm')
-      const response = await fetch('/api/broker/verify-liveness', { method: 'POST', body })
-      if (!response.ok) {
-        const json = (await response.json()) as { error?: { message?: string } }
-        throw new Error(json?.error?.message ?? 'Upload failed')
-      }
-      const json = (await response.json()) as { livenessRef?: unknown }
-      socketRef.current?.send({
-        type: 'recordingFinished',
-        livenessRef: typeof json.livenessRef === 'string' ? json.livenessRef : null,
-      })
+      // Through the API client, not a raw fetch: it turns a non-JSON body (an
+      // HTML error page from a proxy, say) into a readable ApiError instead of
+      // letting `response.json()` throw a parse error at the customer.
+      const { livenessRef } = await verifyLiveness(blob)
+      socketRef.current?.send({ type: 'recordingFinished', livenessRef })
       setNote('Liveness recording complete. Your video was sent to the teller.')
       // Accepted: the camera has done its job. Off it goes, and the next
       // `startRecording` reopens it through the held-start path above.
       setCameraClosed(true)
       closeCamera()
     } catch (cause) {
-      setNote(cause instanceof Error ? cause.message : 'Liveness upload failed.')
-      socketRef.current?.send({ type: 'error', message: String(cause) })
+      const message = cause instanceof Error ? cause.message : 'Liveness upload failed.'
+      setNote(message)
+      // The teller is the one who has to decide what to do about it, and a
+      // raw `String(cause)` would show them the browser's parse wording.
+      socketRef.current?.send({ type: 'error', message })
     }
   }
 

@@ -14,10 +14,17 @@ the nginx boundary.
 
 from __future__ import annotations
 
+import re
+
+import yaml
+
 from app.core.config import BACKEND_ROOT
 
 REPO_ROOT = BACKEND_ROOT.parent
 NGINX_CONF = REPO_ROOT / "frontend" / "nginx.conf"
+COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+
+_SIZE_MULTIPLIERS = {None: 1, "k": 1024, "m": 1024**2, "g": 1024**3}
 
 
 def _location(path: str) -> str:
@@ -56,3 +63,27 @@ def test_the_relay_is_not_cut_off_mid_verification() -> None:
     assert "proxy_read_timeout 1h;" in relay
     assert "proxy_send_timeout 1h;" in relay
     assert "proxy_buffering off;" in relay
+
+
+def test_nginx_accepts_every_upload_the_api_accepts() -> None:
+    """nginx must not be the body-size limit for biometric uploads (§14).
+
+    The API caps a body at `MAX_UPLOAD_BYTES` and answers over the cap with a
+    JSON envelope. nginx's own default (1 MB) sits below that and answers with
+    an HTML 413 page, which the browser cannot parse — the customer display
+    reports a string-parsing error instead of a refused upload, and the teller
+    sees `SyntaxError: The string did not match the expected pattern.`
+    """
+    conf = NGINX_CONF.read_text()
+    match = re.search(r"client_max_body_size\s+(\d+)([kmg])?;", conf)
+    assert match is not None, "nginx must bound request bodies explicitly"
+    nginx_limit = int(match.group(1)) * _SIZE_MULTIPLIERS[match.group(2)]
+
+    compose = yaml.safe_load(COMPOSE_FILE.read_text())
+    raw = str(compose["services"]["app"]["environment"]["MAX_UPLOAD_BYTES"])
+    api_limit = int(raw.rsplit(":-", 1)[1].rstrip("}"))
+
+    assert nginx_limit > api_limit, (
+        f"nginx allows {nginx_limit} bytes but the API only {api_limit}: an oversized body "
+        "would be rejected by nginx as HTML rather than by the API as JSON"
+    )
