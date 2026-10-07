@@ -557,3 +557,38 @@
 .verify-art__frame:only-child:not(.verify-art__frame--wide) {
   width: 55%;
 }
+
+/* The two pictures disagreed (§32): a cross sits between them — the icon and
+   the caption's sentence together, so colour is never the only signal. */
+.verify-art__cross {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  background: var(--color-negative);
+  color: var(--color-surface);
+  animation: verify-cross 0.35s ease-out;
+}
+
+.verify-art__cross svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+/* Nothing has answered yet, so the connector holds still instead of sweeping. */
+.verify-art__bridge--idle {
+  animation: none;
+}
+
+@keyframes verify-cross {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

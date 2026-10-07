@@ -105,7 +105,12 @@ export function VerificationModal({ onClose }: { readonly onClose: () => void })
           className={`grid min-h-0 flex-1 gap-6 overflow-auto px-6 py-5 ${showPreview ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}
         >
           {showPreview && chosen !== null ? (
-            <VerificationPreview checking={verifying} inputs={inputs} method={chosen} />
+            <VerificationPreview
+              checking={verifying}
+              inputs={inputs}
+              matched={result?.face.verified ?? null}
+              method={chosen}
+            />
           ) : null}
 
           <div className="min-w-0">

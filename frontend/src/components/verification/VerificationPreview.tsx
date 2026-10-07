@@ -36,17 +36,25 @@ export function VerificationPreview({
   method,
   inputs,
   checking,
+  matched,
 }: {
   readonly method: VerificationMethod
   readonly inputs: SessionInputs
   readonly checking: boolean
+  /** What the last run said about the face comparison: null until one ran. */
+  readonly matched: boolean | null
 }) {
   const faceSrc = handle(inputs.currentFaceRef)
-  // Only a method that reads the card may show it: for any other method the
-  // picture is in the session but was not part of the question (§13).
-  const cardSrc = method.requiresIdCard
-    ? (handle(inputs.idCardFaceRef) ?? handle(inputs.documentRef))
-    : null
+  // Every method that asks for a live photo has it compared against the
+  // *card's* face — the backend runs `face_match` on the card's crop whether or
+  // not the card is that method's own section — so the card's picture belongs
+  // in the art whenever the two were compared. Without it the cross that says
+  // they disagreed would have nowhere to sit (§13 forbids inventing a source,
+  // not showing the one that was actually used).
+  const cardSrc =
+    method.requiresIdCard || method.requiresCurrentFace
+      ? (handle(inputs.idCardFaceRef) ?? handle(inputs.documentRef))
+      : null
   const livenessSrc = handle(inputs.livenessRef)
 
   const showsPhoto = method.requiresCurrentFace && faceSrc !== null
@@ -66,7 +74,9 @@ export function VerificationPreview({
       ) : null}
       {showsLiveness ? <RemoteCameraFeed hideClip /> : null}
 
-      {showsPhoto ? <PhotoMatchArt cardSrc={cardSrc} checking={checking} faceSrc={faceSrc} /> : null}
+      {showsPhoto ? (
+        <PhotoMatchArt cardSrc={cardSrc} checking={checking} faceSrc={faceSrc} matched={matched} />
+      ) : null}
       {showsLiveness ? <LivenessArt src={livenessSrc} /> : null}
       {empty ? (
         <p className="text-ink-subtle border-border rounded-lg border border-dashed p-4 text-xs" role="status">

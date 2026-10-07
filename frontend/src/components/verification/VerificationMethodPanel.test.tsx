@@ -740,6 +740,79 @@ describe('the report dialog (§24)', () => {
     expect(preview.querySelectorAll('video')).toHaveLength(1)
   })
 
+  it('puts a red cross between the two photos when the face check does not match', async () => {
+    const { report, userEvent } = await openReport(
+      [
+        makeVerifyResult(),
+        makeVerifyResult({ status: 'partial', face: { required: true, verified: false } }),
+      ],
+      true,
+    )
+
+    await userEvent.selectOptions(
+      within(report).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_idcard_face',
+    )
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+
+    // Both pictures, supplied the way the dialog offers them.
+    const upload = document.getElementById('current-face-upload')
+    await waitFor(() => expect(upload).toBeTruthy())
+    fireEvent.change(upload as HTMLInputElement, {
+      target: { files: [new File(['x'], 'face.jpg', { type: 'image/jpeg' })] },
+    })
+    await within(preview).findByAltText('Your live photo')
+    expect(within(preview).getByAltText('Photo on your ID card')).toBeInTheDocument()
+    // Nothing has compared them yet, so nothing sits between them.
+    expect(within(preview).queryByRole('img', { name: /do not match/i })).toBeNull()
+
+    const verify = within(report).getByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(verify).toBeEnabled())
+    await userEvent.click(verify)
+
+    const cross = await within(preview).findByRole('img', { name: /do not match/i })
+    expect(cross.className).toContain('verify-art__cross')
+    // The icon is not alone: the caption says it in words (§32).
+    expect(within(preview).getByText('These two photos did not match.')).toBeInTheDocument()
+  })
+
+  it('shows the cross for the face-only method too, whose check runs against the card', async () => {
+    const { report, userEvent } = await openReport(
+      [
+        makeVerifyResult(),
+        makeVerifyResult({ status: 'partial', face: { required: true, verified: false } }),
+      ],
+      true,
+    )
+
+    // The method whose requirement list never mentions the card — the one a
+    // teller reaches for a photo check, and the case where the cross used to
+    // have nowhere to sit.
+    await userEvent.selectOptions(
+      within(report).getByRole('combobox', { name: 'Verification method' }),
+      'verify_user_info_face',
+    )
+    const preview = await within(report).findByRole('region', { name: 'Preview' })
+
+    const upload = document.getElementById('current-face-upload')
+    await waitFor(() => expect(upload).toBeTruthy())
+    fireEvent.change(upload as HTMLInputElement, {
+      target: { files: [new File(['x'], 'face.jpg', { type: 'image/jpeg' })] },
+    })
+    await within(preview).findByAltText('Your live photo')
+    // The comparison runs against the card's face, so both pictures are here…
+    expect(within(preview).getByAltText('Photo on your ID card')).toBeInTheDocument()
+    expect(within(preview).queryByRole('img', { name: /do not match/i })).toBeNull()
+
+    const verify = within(report).getByRole('button', { name: 'Verify' })
+    await waitFor(() => expect(verify).toBeEnabled())
+    await userEvent.click(verify)
+
+    const cross = await within(preview).findByRole('img', { name: /do not match/i })
+    expect(cross.className).toContain('verify-art__cross')
+    expect(within(preview).getByText('These two photos did not match.')).toBeInTheDocument()
+  })
+
   it('opens a large dialog on Verify and moves the report into it', async () => {
     const { panel, report } = await openReport()
 
