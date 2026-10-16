@@ -25,6 +25,8 @@ import { AppRoutes } from './AppRoutes'
 export function App() {
   return (
     <AppErrorBoundary>
+      {/* The wash the shell's glass surfaces are glass over. Decorative. */}
+      <div aria-hidden="true" className="app-ambient" />
       <a className="btn-primary sr-only-focusable" href="#main-content">
         Skip to main content
       </a>

@@ -18,7 +18,7 @@ export function ImagePreview({ document, onClear }: ImagePreviewProps) {
   const { width, height } = dimensions
 
   return (
-    <figure className="card overflow-hidden">
+    <figure className="card lift overflow-hidden">
       <img
         src={previewUrl}
         alt={`Preview of the selected file: ${file.name}`}

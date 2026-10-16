@@ -18,6 +18,11 @@ import { useIdCardProcessing } from '../features/id-card-processing/ProcessingCo
  * continues is anything transmitted: `POST /api/v1/kyc/id-card/process` runs here,
  * before the navigation, exactly as the §6 flow orders it.
  *
+ * Visually this page is the product's handshake: one glass card, one hero
+ * dropzone, and nothing else competing for the first glance. Every waiting
+ * state — restoring, checking, reading the card — is a shimmer in the shape of
+ * the content to come rather than a spinner (see `index.css`).
+ *
  * The result is held above the router (see `App`), so the workspace on `/id-card`
  * renders what this page produced. A failed processing request keeps the user
  * here with the server's own message and their file still selected, so retrying
@@ -72,12 +77,17 @@ export function LandingPage() {
   const error = validationError ?? processingError
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center p-4 sm:p-6">
-      <div className="card p-6 sm:p-8">
+    <main className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-2xl flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
+      <div className="card p-6 sm:p-10">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold">Identity Verification</h1>
-            <p className="text-ink-muted mt-2 text-sm">
+            <p className="text-accent-from text-xs font-semibold tracking-[0.16em] uppercase">
+              Step 1 of 2 · Document
+            </p>
+            <h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">
+              <span className="accent-text">Identity Verification</span>
+            </h1>
+            <p className="text-ink-muted mt-2 max-w-sm text-sm leading-relaxed">
               Verify your identity securely using your Cambodian National ID Card.
             </p>
           </div>
@@ -91,13 +101,17 @@ export function LandingPage() {
             // A stored copy is on its way back (D21); hold the dropzone until it
             // lands, so a second pick cannot race the restore.
             <div
-              className="border-border bg-surface-sunken rounded-xl border-2 border-dashed p-8 text-center"
+              className="border-white/60 bg-white/50 rounded-xl border-2 border-dashed p-8 text-center backdrop-blur-md"
               role="status"
             >
               <p className="text-sm font-semibold">Restoring your selection…</p>
               <p className="text-ink-muted mt-1 text-sm">
                 Bringing back your uploaded document.
               </p>
+              <span
+                className="skeleton mx-auto mt-4 block h-2.5 w-40"
+                aria-hidden="true"
+              />
             </div>
           ) : (
             <Dropzone
@@ -110,6 +124,22 @@ export function LandingPage() {
 
         {document ? (
           <>
+            {isProcessing ? (
+              /* Reading the card is a few seconds of local work: shimmer in the
+                 shape of the fields it is finding, not a spinner. */
+              <div className="border-white/60 bg-white/55 mt-6 rounded-xl border p-4 backdrop-blur-md" role="status">
+                <p className="text-sm font-semibold">Reading your document…</p>
+                <p className="text-ink-muted mt-0.5 text-sm">
+                  OCR and face detection run on this machine.
+                </p>
+                <span className="mt-3 grid gap-2" aria-hidden="true">
+                  <span className="skeleton h-2.5 w-2/3" />
+                  <span className="skeleton h-2.5 w-1/2" />
+                  <span className="skeleton h-2.5 w-3/5" />
+                </span>
+              </div>
+            ) : null}
+
             {error ? (
               <p
                 role="alert"
@@ -120,7 +150,7 @@ export function LandingPage() {
             ) : null}
             <button
               type="button"
-              className="btn-primary mt-6 w-full"
+              className="btn-primary mt-6 w-full py-3 text-base"
               disabled={isProcessing}
               onClick={() => void handleContinue()}
             >
@@ -129,11 +159,33 @@ export function LandingPage() {
           </>
         ) : null}
 
-        <p className="text-ink-subtle mt-6 text-xs leading-relaxed">
-          Your document stays on this device until you choose to submit it, and is deleted
-          automatically after verification.
+        <p className="text-ink-subtle mt-6 flex items-start gap-2 text-xs leading-relaxed">
+          <LockIcon />
+          <span>
+            Your document stays on this device until you choose to submit it, and is deleted
+            automatically after verification.
+          </span>
         </p>
       </div>
     </main>
+  )
+}
+
+/** Decorative: the sentence beside it carries the promise. */
+function LockIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="mt-px h-3.5 w-3.5 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4.5" y="10.5" width="15" height="9.5" rx="2" />
+      <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" />
+    </svg>
   )
 }

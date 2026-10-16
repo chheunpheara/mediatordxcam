@@ -37,7 +37,7 @@ export function RequireAdmin({ children }: { readonly children: ReactNode }) {
   }
   if (!user.isAdmin) {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center p-4 sm:p-6">
+      <main className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-xl flex-col justify-center p-4 sm:p-6">
         <div className="card p-6 sm:p-8" role="alert">
           <h1 className="text-xl font-semibold">Administration is restricted</h1>
           <p className="text-ink-muted mt-2 text-sm">
